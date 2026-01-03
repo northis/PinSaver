@@ -35,10 +35,10 @@ pip install -r src/requirements.txt
 Copy the example environment file and adjust if needed:
 
 ```bash
-cp src/.env.example src/.env
+cp .env.example .env
 ```
 
-Edit `src/.env` to configure:
+Edit `.env` to configure:
 
 ```env
 HOST=0.0.0.0
@@ -103,8 +103,6 @@ PinSaver/
 │   ├── server.py          # FastAPI server
 │   ├── models.py          # Database models
 │   ├── requirements.txt   # Python dependencies
-│   ├── .env               # Environment configuration (create from .env.example)
-│   ├── .env.example       # Example environment file
 │   └── static/
 │       ├── index.html     # Main web interface
 │       ├── styles.css     # Styles
@@ -120,6 +118,8 @@ PinSaver/
 │   └── options.js         # Options logic
 ├── originals/             # Archived images storage
 ├── pins.db                # SQLite database
+├── .env                   # Environment configuration (create from .env.example)
+├── .env.example           # Example environment file
 └── README.md
 ```
 

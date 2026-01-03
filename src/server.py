@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from models import get_db_path, Pin, insert_pin, pin_exists
 
-load_dotenv()
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
