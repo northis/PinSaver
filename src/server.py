@@ -459,6 +459,186 @@ HTML_TEMPLATE = """
             background: #c4001d;
         }
 
+        /* View button on card */
+        .pin-card .view-btn {
+            position: absolute;
+            bottom: 48px;
+            right: 8px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s, background 0.2s;
+            z-index: 10;
+        }
+
+        .pin-card:hover .view-btn {
+            opacity: 1;
+        }
+
+        .pin-card .view-btn:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        /* Carousel styles */
+        .carousel-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 3000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .carousel-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .carousel-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .carousel-image-wrapper {
+            max-width: calc(100% - 160px);
+            max-height: calc(100% - 80px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .carousel-image {
+            max-width: 100%;
+            max-height: calc(100vh - 80px);
+            object-fit: contain;
+            border-radius: 8px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .carousel-image.loaded {
+            opacity: 1;
+        }
+
+        .carousel-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .carousel-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .carousel-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .carousel-btn-prev {
+            left: 24px;
+        }
+
+        .carousel-btn-next {
+            right: 24px;
+        }
+
+        .carousel-close {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .carousel-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .carousel-info {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .carousel-counter {
+            font-weight: 500;
+        }
+
+        .carousel-link {
+            color: #fff;
+            text-decoration: none;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        .carousel-link:hover {
+            opacity: 1;
+        }
+
+        .carousel-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+        }
+
+        .carousel-loading .loading-spinner {
+            border-top-color: white;
+        }
+
         .loading {
             text-align: center;
             padding: 40px;
@@ -560,6 +740,102 @@ HTML_TEMPLATE = """
             return minIndex;
         }
 
+        // Carousel functionality (defined early for use in createPinCard)
+        let carouselIndex = 0;
+        let carouselLoading = false;
+
+        function openCarousel(index) {
+            carouselIndex = index;
+            document.getElementById('carouselOverlay').classList.add('show');
+            document.body.style.overflow = 'hidden';
+            updateCarousel();
+        }
+
+        function hideCarousel() {
+            document.getElementById('carouselOverlay').classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        function updateCarousel() {
+            const pin = allPins[carouselIndex];
+            if (!pin) return;
+
+            const img = document.getElementById('carouselImage');
+            const counter = document.getElementById('carouselCounter');
+            const link = document.getElementById('carouselLink');
+            const prevBtn = document.getElementById('carouselPrev');
+            const nextBtn = document.getElementById('carouselNext');
+
+            img.classList.remove('loaded');
+            img.src = pin.image_url;
+            img.onload = () => img.classList.add('loaded');
+
+            counter.textContent = `${carouselIndex + 1} / ${totalPins}`;
+            link.href = pin.pinterest_url;
+
+            prevBtn.disabled = carouselIndex === 0;
+            nextBtn.disabled = false;
+
+            // Preload next image
+            if (carouselIndex < allPins.length - 1) {
+                const nextImg = new Image();
+                nextImg.src = allPins[carouselIndex + 1].image_url;
+            }
+
+            // Load more pins if near the end
+            if (carouselIndex >= allPins.length - 3 && hasMore && !carouselLoading) {
+                loadMoreForCarousel();
+            }
+        }
+
+        async function loadMoreForCarousel() {
+            if (carouselLoading || !hasMore) return;
+            carouselLoading = true;
+
+            try {
+                const response = await fetch(`/api/pins?offset=${offset}&limit=${BATCH_SIZE}`);
+                const data = await response.json();
+
+                totalPins = data.total;
+                hasMore = data.has_more;
+                offset += data.pins.length;
+
+                allPins.push(...data.pins);
+                statsEl.textContent = `${allPins.length} of ${totalPins} pins loaded`;
+
+                // Update counter
+                document.getElementById('carouselCounter').textContent = `${carouselIndex + 1} / ${totalPins}`;
+
+                // Also render new pins in masonry
+                layoutPins();
+            } catch (error) {
+                console.error('Error loading more pins:', error);
+            } finally {
+                carouselLoading = false;
+            }
+        }
+
+        function carouselPrev() {
+            if (carouselIndex > 0) {
+                carouselIndex--;
+                updateCarousel();
+            }
+        }
+
+        function carouselNext() {
+            if (carouselIndex < allPins.length - 1) {
+                carouselIndex++;
+                updateCarousel();
+            } else if (hasMore) {
+                loadMoreForCarousel().then(() => {
+                    if (carouselIndex < allPins.length - 1) {
+                        carouselIndex++;
+                        updateCarousel();
+                    }
+                });
+            }
+        }
+
         function createPinCard(pin, colWidth) {
             const card = document.createElement('div');
             card.className = 'pin-card';
@@ -593,9 +869,21 @@ HTML_TEMPLATE = """
                 showDeleteModal(pin.pin_id);
             };
 
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'view-btn';
+            viewBtn.innerHTML = '⛶';
+            viewBtn.title = 'View fullscreen';
+            viewBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const index = allPins.findIndex(p => p.pin_id === pin.pin_id);
+                if (index > -1) openCarousel(index);
+            };
+
             link.appendChild(img);
             card.appendChild(link);
             card.appendChild(deleteBtn);
+            card.appendChild(viewBtn);
             card.appendChild(info);
 
             return card;
@@ -840,9 +1128,44 @@ HTML_TEMPLATE = """
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 hideDeleteModal();
+                hideCarousel();
+            }
+        });
+
+        // Carousel keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (!document.getElementById('carouselOverlay').classList.contains('show')) return;
+            
+            if (e.key === 'ArrowLeft') {
+                carouselPrev();
+            } else if (e.key === 'ArrowRight') {
+                carouselNext();
+            }
+        });
+
+        // Close carousel on overlay click (not on image)
+        document.getElementById('carouselOverlay').addEventListener('click', (e) => {
+            if (e.target.id === 'carouselOverlay' || e.target.classList.contains('carousel-container')) {
+                hideCarousel();
             }
         });
     </script>
+
+    <!-- Carousel modal -->
+    <div class="carousel-overlay" id="carouselOverlay">
+        <div class="carousel-container">
+            <button class="carousel-close" onclick="hideCarousel()" title="Close">✕</button>
+            <button class="carousel-btn carousel-btn-prev" id="carouselPrev" onclick="carouselPrev()" title="Previous">❮</button>
+            <div class="carousel-image-wrapper">
+                <img class="carousel-image" id="carouselImage" src="" alt="Pin image">
+            </div>
+            <button class="carousel-btn carousel-btn-next" id="carouselNext" onclick="carouselNext()" title="Next">❯</button>
+            <div class="carousel-info">
+                <span class="carousel-counter" id="carouselCounter">1 / 100</span>
+                <a class="carousel-link" id="carouselLink" href="#" target="_blank" rel="noopener noreferrer">Open on Pinterest ↗</a>
+            </div>
+        </div>
+    </div>
 
     <!-- Delete confirmation modal -->
     <div class="modal-overlay" id="deleteModal">
