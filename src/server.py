@@ -393,12 +393,6 @@ def add_page():
     return (STATIC_PATH / "add.html").read_text(encoding="utf-8")
 
 
-@app.get("/share-handler", response_class=HTMLResponse)
-def share_handler():
-    """Serve the share handler page for PWA Share Target."""
-    return (STATIC_PATH / "share-handler.html").read_text(encoding="utf-8")
-
-
 @app.post("/share")
 async def share_target(title: str = "", text: str = "", url: str = ""):
     """
