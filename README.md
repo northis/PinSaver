@@ -12,7 +12,7 @@ A self-hosted solution for archiving Pinterest pins with original quality images
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+
 - Chrome browser (for extension)
 
 ## Installation

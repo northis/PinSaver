@@ -260,6 +260,12 @@ def get_image(filename: str):
     return FileResponse(file_path)
 
 
+@app.get("/favicon.ico")
+def favicon():
+    """Serve the favicon."""
+    return FileResponse(STATIC_PATH / "favicon.ico")
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     """Serve the main HTML page."""
