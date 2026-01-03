@@ -1,3 +1,4 @@
-pinterest_archive.db
+*.db
 originals/
 __pycache__/
+.env
