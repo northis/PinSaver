@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Pin - Pinterest Archive</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <meta name="theme-color" content="#e60023">
+    <style>
+        .add-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .add-card {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+        }
+
+        .add-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+            text-align: center;
+        }
+
+        .add-subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .add-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .add-input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+        }
+
+        .add-input:focus {
+            outline: none;
+            border-color: #e60023;
+        }
+
+        .add-input::placeholder {
+            color: #999;
+        }
+
+        .add-btn {
+            padding: 14px 24px;
+            border-radius: 24px;
+            border: none;
+            background: #e60023;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .add-btn:hover {
+            background: #c4001d;
+        }
+
+        .add-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .add-status {
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            text-align: center;
+            display: none;
+        }
+
+        .add-status.loading {
+            display: block;
+            background: #f5f5f5;
+            color: #666;
+        }
+
+        .add-status.success {
+            display: block;
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .add-status.error {
+            display: block;
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .add-status.exists {
+            display: block;
+            background: #fff3e0;
+            color: #ef6c00;
+        }
+
+        .add-link {
+            text-align: center;
+            margin-top: 24px;
+        }
+
+        .add-link a {
+            color: #e60023;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .add-link a:hover {
+            text-decoration: underline;
+        }
+
+        .add-help {
+            margin-top: 24px;
+            padding: 16px;
+            background: #f9f9f9;
+            border-radius: 12px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .add-help strong {
+            color: #333;
+        }
+
+        .add-help code {
+            background: #e8e8e8;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="add-container">
+        <div class="add-card">
+            <div class="add-title">📌 Add Pin</div>
+            <div class="add-subtitle">Paste a Pinterest pin URL or shared text</div>
+            
+            <form class="add-form" id="addForm">
+                <textarea 
+                    class="add-input" 
+                    id="pinInput" 
+                    rows="4" 
+                    placeholder="Paste Pinterest URL or shared text here...&#10;&#10;Example: https://pin.it/abc123 or https://pinterest.com/pin/123456/"
+                    autofocus
+                ></textarea>
+                <button type="submit" class="add-btn" id="addBtn">Save Pin</button>
+            </form>
+            
+            <div class="add-status" id="status"></div>
+            
+            <div class="add-link">
+                <a href="/">← Back to Archive</a>
+            </div>
+            
+            <div class="add-help">
+                <strong>How to use:</strong><br>
+                1. Copy the pin URL from Pinterest app (Share → Copy link)<br>
+                2. Paste it here and click "Save Pin"<br><br>
+                <strong>Supported formats:</strong><br>
+                <code>https://pin.it/...</code><br>
+                <code>https://pinterest.com/pin/...</code><br>
+                <code>https://www.pinterest.com/pin/...</code>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('addForm');
+        const input = document.getElementById('pinInput');
+        const btn = document.getElementById('addBtn');
+        const status = document.getElementById('status');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const text = input.value.trim();
+            if (!text) return;
+            
+            btn.disabled = true;
+            showStatus('loading', 'Processing...');
+            
+            try {
+                // Extract pin ID from various URL formats
+                let pinId = null;
+                
+                // Try direct pin URL: pinterest.com/pin/123456/
+                const pinMatch = text.match(/pin\/(\d+)/);
+                if (pinMatch) {
+                    pinId = pinMatch[1];
+                }
+                
+                // Try short URL: pin.it/abc123 - need to resolve it
+                if (!pinId) {
+                    const shortMatch = text.match(/pin\.it\/([a-zA-Z0-9]+)/);
+                    if (shortMatch) {
+                        showStatus('loading', 'Resolving short URL...');
+                        // We'll let the server handle short URL resolution
+                        const response = await fetch('/api/pins/from-url', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: text })
+                        });
+                        const data = await response.json();
+                        handleResponse(data);
+                        return;
+                    }
+                }
+                
+                if (!pinId) {
+                    showStatus('error', 'Could not find a valid Pinterest pin URL');
+                    btn.disabled = false;
+                    return;
+                }
+                
+                // Try to extract original image URL from text
+                let originalUrl = null;
+                const originalsMatch = text.match(/(https:\/\/i\.pinimg\.com\/originals\/[^\s"'<>]+)/);
+                if (originalsMatch) {
+                    originalUrl = originalsMatch[1];
+                }
+                
+                // If no original URL, try to construct from any pinimg URL
+                if (!originalUrl) {
+                    const fileIdMatch = text.match(/pinimg\.com\/[^\/]+\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.(\w+)/);
+                    if (fileIdMatch) {
+                        originalUrl = `https://i.pinimg.com/originals/${fileIdMatch[1]}/${fileIdMatch[2]}/${fileIdMatch[3]}/${fileIdMatch[4]}.${fileIdMatch[5]}`;
+                    }
+                }
+                
+                // If still no original URL, use the from-url endpoint
+                if (!originalUrl) {
+                    showStatus('loading', 'Fetching pin details...');
+                    const response = await fetch('/api/pins/from-url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: text })
+                    });
+                    const data = await response.json();
+                    handleResponse(data);
+                    return;
+                }
+                
+                // Direct add with known pin_id and original_url
+                const response = await fetch('/api/pins', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pin_id: pinId,
+                        original_url: originalUrl
+                    })
+                });
+                const data = await response.json();
+                handleResponse(data);
+                
+            } catch (error) {
+                showStatus('error', 'Network error: ' + error.message);
+                btn.disabled = false;
+            }
+        });
+        
+        function handleResponse(data) {
+            btn.disabled = false;
+            
+            if (data.status === 'added') {
+                showStatus('success', `✅ Pin ${data.pin?.pin_id || ''} saved!`);
+                input.value = '';
+            } else if (data.status === 'exists') {
+                showStatus('exists', `📋 ${data.message}`);
+                input.value = '';
+            } else if (data.detail) {
+                showStatus('error', `❌ ${data.detail}`);
+            } else if (data.error) {
+                showStatus('error', `❌ ${data.error}`);
+            } else {
+                showStatus('error', '❌ Unknown error');
+            }
+        }
+        
+        function showStatus(type, message) {
+            status.className = 'add-status ' + type;
+            status.textContent = message;
+        }
+        
+        // Auto-paste from clipboard on focus (if permission granted)
+        input.addEventListener('focus', async () => {
+            if (input.value) return;
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text && (text.includes('pinterest') || text.includes('pin.it'))) {
+                    input.value = text;
+                }
+            } catch (e) {
+                // Clipboard access denied, ignore
+            }
+        });
+    </script>
+</body>
+</html>
