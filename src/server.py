@@ -263,7 +263,7 @@ def get_image(filename: str):
 @app.get("/favicon.ico")
 def favicon():
     """Serve the favicon."""
-    return FileResponse(STATIC_PATH / "favicon.ico")
+    return FileResponse(STATIC_PATH / "favicon.ico", media_type="image/x-icon")
 
 
 @app.get("/", response_class=HTMLResponse)
