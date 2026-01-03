@@ -40,15 +40,27 @@ def is_pinterest_origin(origin: str) -> bool:
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     """Custom CORS middleware to support all Pinterest subdomains."""
+    from fastapi.responses import Response
+    
     origin = request.headers.get("origin", "")
+    
+    # Handle preflight OPTIONS requests
+    if request.method == "OPTIONS" and is_pinterest_origin(origin):
+        response = Response(status_code=200)
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Max-Age"] = "86400"
+        return response
     
     response = await call_next(request)
     
     if is_pinterest_origin(origin):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     
     return response
 
@@ -199,119 +211,33 @@ async def add_pin(request: AddPinRequest):
     }
 
 
-class AddPinFromUrlRequest(BaseModel):
-    """Request model for adding a pin from URL."""
-    url: str
+class CheckPinsRequest(BaseModel):
+    """Request model for checking multiple pins."""
+    pin_ids: list[str]
 
 
-@app.post("/api/pins/from-url")
-async def add_pin_from_url(request: AddPinFromUrlRequest):
+@app.post("/api/pins/check")
+def check_pins_exist(request: CheckPinsRequest):
     """
-    Add a pin from a Pinterest URL (including short pin.it links).
-    
-    Resolves short URLs, fetches the pin page to extract the original image URL,
-    and saves the pin to the archive.
+    Check which pins from a list already exist in the archive.
     
     Args:
-        request: AddPinFromUrlRequest with the Pinterest URL.
+        request: CheckPinsRequest with list of pin IDs to check.
     
     Returns:
-        Dictionary with status and pin info.
+        Dictionary with existing pin IDs.
     """
-    url = request.url.strip()
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        # Resolve short URLs (pin.it)
-        if 'pin.it' in url:
-            try:
-                response = await client.head(url)
-                url = str(response.url)
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to resolve short URL: {str(e)}")
-        
-        # Extract pin ID
-        pin_match = re.search(r'pin/(\d+)', url)
-        if not pin_match:
-            raise HTTPException(status_code=400, detail="Could not find pin ID in URL")
-        
-        pin_id = pin_match.group(1)
-        
-        # Check if already exists
-        conn = get_db_connection()
-        if pin_exists(conn, pin_id):
-            conn.close()
-            return {
-                "status": "exists",
-                "message": f"Pin {pin_id} already exists in archive"
-            }
-        
-        # Fetch pin page to get original image URL
-        try:
-            pin_url = f"https://pinterest.com/pin/{pin_id}/"
-            response = await client.get(pin_url)
-            response.raise_for_status()
-            html = response.text
-            
-            # Try to find original image URL in page
-            original_match = re.search(r'https://i\.pinimg\.com/originals/[a-f0-9]{2}/[a-f0-9]{2}/[a-f0-9]{2}/[a-f0-9]{32}\.\w+', html)
-            if not original_match:
-                # Try to find any pinimg URL and convert to originals
-                file_match = re.search(r'pinimg\.com/[^/]+/([a-f0-9]{2})/([a-f0-9]{2})/([a-f0-9]{2})/([a-f0-9]{32})\.(\w+)', html)
-                if file_match:
-                    original_url = f"https://i.pinimg.com/originals/{file_match.group(1)}/{file_match.group(2)}/{file_match.group(3)}/{file_match.group(4)}.{file_match.group(5)}"
-                else:
-                    conn.close()
-                    raise HTTPException(status_code=400, detail="Could not find image URL in pin page")
-            else:
-                original_url = original_match.group(0)
-            
-        except httpx.HTTPError as e:
-            conn.close()
-            raise HTTPException(status_code=500, detail=f"Failed to fetch pin page: {str(e)}")
-        
-        # Extract file info
-        file_id_match = re.search(r'/([a-f0-9]{32})\.(\w+)(?:\?|$)', original_url)
-        if not file_id_match:
-            conn.close()
-            raise HTTPException(status_code=400, detail="Invalid image URL format")
-        
-        file_id = file_id_match.group(1)
-        file_extension = file_id_match.group(2)
-        
-        # Download image
-        file_path = ORIGINALS_PATH / f"{file_id}.{file_extension}"
-        if not file_path.exists():
-            try:
-                response = await client.get(original_url)
-                response.raise_for_status()
-                file_path.write_bytes(response.content)
-            except Exception as e:
-                conn.close()
-                raise HTTPException(status_code=500, detail=f"Failed to download image: {str(e)}")
-        
-        # Save to database
-        pin = Pin(
-            pin_id=pin_id,
-            file_id=file_id,
-            file_extension=file_extension,
-            pinterest_url=f"https://pinterest.com/pin/{pin_id}/",
-            original_url=original_url,
-            source_date=int(time.time())
-        )
-        
-        insert_pin(conn, pin)
-        conn.commit()
-        conn.close()
-        
-        return {
-            "status": "added",
-            "message": f"Pin {pin_id} added to archive",
-            "pin": {
-                "pin_id": pin.pin_id,
-                "file_id": pin.file_id,
-                "file_extension": pin.file_extension
-            }
-        }
+    existing = []
+    for pin_id in request.pin_ids:
+        cursor.execute("SELECT 1 FROM pins WHERE pin_id = ?", (pin_id,))
+        if cursor.fetchone():
+            existing.append(pin_id)
+    
+    conn.close()
+    return {"existing": existing}
 
 
 @app.delete("/api/pins/{pin_id}")
@@ -385,23 +311,6 @@ def favicon():
 def index():
     """Serve the main HTML page."""
     return (STATIC_PATH / "index.html").read_text(encoding="utf-8")
-
-
-@app.get("/add", response_class=HTMLResponse)
-def add_page():
-    """Serve the add pin page for manual URL input."""
-    return (STATIC_PATH / "add.html").read_text(encoding="utf-8")
-
-
-@app.post("/share")
-async def share_target(title: str = "", text: str = "", url: str = ""):
-    """
-    Handle PWA Share Target POST requests.
-    Redirects to share-handler page with query params.
-    """
-    from fastapi.responses import RedirectResponse
-    params = f"?title={title}&text={text}&url={url}"
-    return RedirectResponse(url=f"/share-handler{params}", status_code=303)
 
 
 if __name__ == "__main__":

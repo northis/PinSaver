@@ -63,3 +63,48 @@
     flex: 1;
     line-height: 1.4;
 }
+
+/* Archive icons for profile/favorites page */
+.pa-archive-icon {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 100;
+    transition: transform 0.2s, background 0.2s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.pa-archive-icon:hover {
+    transform: scale(1.1);
+}
+
+.pa-archived {
+    background: #00c853;
+    color: white;
+    cursor: default;
+}
+
+.pa-not-archived {
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+}
+
+.pa-not-archived:hover {
+    background: #e60023;
+}
+
+.pa-loading {
+    background: #ff9800;
+    color: white;
+    cursor: wait;
+    animation: pa-pulse 1s ease-in-out infinite;
+}

@@ -1,6 +1,7 @@
 /**
  * Pinterest Archive Saver - Content Script
- * Intercepts Save button clicks and saves pins to local archive
+ * Intercepts Save button clicks and saves pins to local archive.
+ * Also adds archive status icons to pins on profile/favorites pages.
  */
 
 (function() {
@@ -8,6 +9,9 @@
 
     const DEFAULT_SERVER_URL = 'http://localhost:8000';
     let serverUrl = DEFAULT_SERVER_URL;
+    let archivedPinIds = new Set();
+    let pendingPinIds = new Set();
+    let checkDebounceTimer = null;
 
     // Load server URL from storage
     chrome.storage.sync.get(['serverUrl'], (result) => {
@@ -17,7 +21,9 @@
     });
 
     /**
-     * Extract pin ID from current URL or element
+     * Extract pin ID from URL
+     * @param {string} url - URL to extract pin ID from
+     * @returns {string|null} Pin ID or null
      */
     function getPinIdFromUrl(url) {
         const match = url.match(/\/pin\/(\d+)/);
@@ -26,6 +32,9 @@
 
     /**
      * Build original URL from file ID
+     * @param {string} fileId - 32-character file hash
+     * @param {string} extension - File extension
+     * @returns {string} Original image URL
      */
     function buildOriginalUrl(fileId, extension) {
         return `https://i.pinimg.com/originals/${fileId.slice(0,2)}/${fileId.slice(2,4)}/${fileId.slice(4,6)}/${fileId}.${extension}`;
@@ -33,9 +42,10 @@
 
     /**
      * Extract file ID from image URL or src
+     * @param {string} src - Image source URL
+     * @returns {{fileId: string, extension: string}|null} File info or null
      */
     function extractFileId(src) {
-        // Match pattern: /XX/YY/ZZ/HASH.ext or just HASH.ext
         const match = src.match(/([a-f0-9]{32})\.(\w+)(?:\?|$)/i);
         if (match) {
             return { fileId: match[1], extension: match[2] };
@@ -261,10 +271,288 @@
         });
     }
 
-    // Initialize
+    // ==========================================
+    // FAVORITES/PROFILE PAGE FUNCTIONALITY
+    // ==========================================
+
+    /**
+     * Check if current page is a profile/favorites page (grid of pins)
+     * @returns {boolean} True if on profile page
+     */
+    function isProfilePage() {
+        const url = window.location.href;
+        // Profile pages: pinterest.com/username/ or pinterest.com/username/_saved/
+        return url.match(/pinterest\.com\/[^\/]+\/?(_saved|_created)?/i) && !url.includes('/pin/');
+    }
+
+    /**
+     * Find all pin elements on the page
+     * @returns {NodeListOf<Element>} Pin elements
+     */
+    function findPinElements() {
+        // Pinterest uses data-test-id="pin" or links containing /pin/
+        return document.querySelectorAll('[data-test-id="pin"], [data-test-id="pinWrapper"], a[href*="/pin/"]');
+    }
+
+    /**
+     * Extract pin ID from a pin element
+     * @param {Element} element - Pin element
+     * @returns {string|null} Pin ID or null
+     */
+    function getPinIdFromElement(element) {
+        // Try to find link with pin ID
+        const link = element.tagName === 'A' ? element : element.querySelector('a[href*="/pin/"]');
+        if (link) {
+            const pinId = getPinIdFromUrl(link.href);
+            if (pinId) return pinId;
+        }
+        return null;
+    }
+
+    /**
+     * Extract original image URL from a pin element on grid
+     * @param {Element} element - Pin element
+     * @returns {string|null} Original image URL or null
+     */
+    function getOriginalUrlFromPinElement(element) {
+        const img = element.querySelector('img[src*="pinimg.com"]');
+        if (img) {
+            const fileInfo = extractFileId(img.src);
+            if (fileInfo) {
+                return buildOriginalUrl(fileInfo.fileId, fileInfo.extension);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check which pins are archived (batch request)
+     * @param {string[]} pinIds - Array of pin IDs to check
+     */
+    async function checkArchivedPins(pinIds) {
+        if (pinIds.length === 0) return;
+        
+        try {
+            const response = await fetch(`${serverUrl}/api/pins/check`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin_ids: pinIds })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                data.existing.forEach(id => archivedPinIds.add(id));
+                updateArchiveIcons();
+            }
+        } catch (error) {
+            console.error('Pinterest Archive: Failed to check pins', error);
+        }
+    }
+
+    /**
+     * Schedule a debounced check for new pins
+     */
+    function scheduleArchiveCheck() {
+        if (checkDebounceTimer) {
+            clearTimeout(checkDebounceTimer);
+        }
+        checkDebounceTimer = setTimeout(() => {
+            const newPinIds = Array.from(pendingPinIds);
+            pendingPinIds.clear();
+            if (newPinIds.length > 0) {
+                checkArchivedPins(newPinIds);
+            }
+        }, 500);
+    }
+
+    /**
+     * Create archive icon element
+     * @param {string} pinId - Pin ID
+     * @param {boolean} isArchived - Whether pin is archived
+     * @returns {HTMLElement} Icon element
+     */
+    function createArchiveIcon(pinId, isArchived) {
+        const icon = document.createElement('div');
+        icon.className = `pa-archive-icon ${isArchived ? 'pa-archived' : 'pa-not-archived'}`;
+        icon.dataset.pinId = pinId;
+        icon.title = isArchived ? 'In archive' : 'Click to save to archive';
+        icon.innerHTML = isArchived ? '✓' : '↓';
+        
+        if (!isArchived) {
+            icon.addEventListener('click', handleArchiveIconClick);
+        }
+        
+        return icon;
+    }
+
+    /**
+     * Handle click on archive icon
+     * @param {Event} event - Click event
+     */
+    async function handleArchiveIconClick(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        const icon = event.currentTarget;
+        const pinId = icon.dataset.pinId;
+        
+        if (!pinId || archivedPinIds.has(pinId)) return;
+        
+        // Find the pin element and extract image URL
+        const pinElement = icon.closest('[data-test-id="pin"], [data-test-id="pinWrapper"]') || 
+                          icon.closest('div').parentElement;
+        const originalUrl = getOriginalUrlFromPinElement(pinElement);
+        
+        if (!originalUrl) {
+            showNotification('Could not find image URL', 'error');
+            return;
+        }
+        
+        // Update icon to loading state
+        icon.innerHTML = '⏳';
+        icon.classList.remove('pa-not-archived');
+        icon.classList.add('pa-loading');
+        
+        // Save to archive
+        try {
+            const response = await fetch(`${serverUrl}/api/pins`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pin_id: pinId,
+                    original_url: originalUrl
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                archivedPinIds.add(pinId);
+                
+                // Update icon to archived state
+                icon.innerHTML = '✓';
+                icon.classList.remove('pa-loading');
+                icon.classList.add('pa-archived');
+                icon.title = 'In archive';
+                icon.removeEventListener('click', handleArchiveIconClick);
+                
+                if (result.status === 'exists') {
+                    showNotification(`Pin ${pinId} already in archive`, 'exists');
+                } else {
+                    showNotification(`Pin ${pinId} saved!`, 'success');
+                }
+            } else {
+                throw new Error('Server error');
+            }
+        } catch (error) {
+            // Revert icon state
+            icon.innerHTML = '↓';
+            icon.classList.remove('pa-loading');
+            icon.classList.add('pa-not-archived');
+            showNotification(`Failed to save pin ${pinId}`, 'error');
+        }
+    }
+
+    /**
+     * Add archive icons to pin elements
+     */
+    function addArchiveIcons() {
+        const pinElements = findPinElements();
+        
+        pinElements.forEach(element => {
+            // Skip if already processed
+            if (element.dataset.paProcessed) return;
+            
+            const pinId = getPinIdFromElement(element);
+            if (!pinId) return;
+            
+            element.dataset.paProcessed = 'true';
+            
+            // Find the container to add icon to
+            let container = element;
+            if (element.tagName === 'A') {
+                container = element.parentElement;
+            }
+            
+            // Make container relative for absolute positioning
+            if (getComputedStyle(container).position === 'static') {
+                container.style.position = 'relative';
+            }
+            
+            // Add to pending check if not already known
+            if (!archivedPinIds.has(pinId)) {
+                pendingPinIds.add(pinId);
+            }
+            
+            // Create and add icon
+            const isArchived = archivedPinIds.has(pinId);
+            const icon = createArchiveIcon(pinId, isArchived);
+            container.appendChild(icon);
+        });
+        
+        // Schedule check for new pins
+        if (pendingPinIds.size > 0) {
+            scheduleArchiveCheck();
+        }
+    }
+
+    /**
+     * Update archive icons based on current archivedPinIds set
+     */
+    function updateArchiveIcons() {
+        document.querySelectorAll('.pa-archive-icon').forEach(icon => {
+            const pinId = icon.dataset.pinId;
+            if (archivedPinIds.has(pinId) && !icon.classList.contains('pa-archived')) {
+                icon.innerHTML = '✓';
+                icon.classList.remove('pa-not-archived', 'pa-loading');
+                icon.classList.add('pa-archived');
+                icon.title = 'In archive';
+                icon.removeEventListener('click', handleArchiveIconClick);
+            }
+        });
+    }
+
+    // ==========================================
+    // INITIALIZATION
+    // ==========================================
+
+    /**
+     * Initialize observer for dynamic content
+     */
+    function initObserver() {
+        const observer = new MutationObserver((mutations) => {
+            let shouldCheck = false;
+            for (const mutation of mutations) {
+                if (mutation.addedNodes.length > 0) {
+                    shouldCheck = true;
+                    break;
+                }
+            }
+            if (shouldCheck) {
+                attachToSaveButtons();
+                if (isProfilePage()) {
+                    addArchiveIcons();
+                }
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    /**
+     * Initialize the extension
+     */
     function init() {
         attachToSaveButtons();
         initObserver();
+        
+        // If on profile page, add archive icons
+        if (isProfilePage()) {
+            addArchiveIcons();
+        }
+        
         console.log('Pinterest Archive Saver initialized');
     }
 

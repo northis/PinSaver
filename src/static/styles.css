@@ -38,28 +38,6 @@ header h1 {
     gap: 12px;
 }
 
-.header-controls {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
-.add-pin-btn {
-    padding: 8px 16px;
-    border-radius: 20px;
-    background: white;
-    color: #e60023;
-    font-size: 14px;
-    font-weight: 600;
-    text-decoration: none;
-    transition: background 0.2s, transform 0.2s;
-}
-
-.add-pin-btn:hover {
-    background: #f5f5f5;
-    transform: scale(1.05);
-}
-
 .sort-controls {
     display: flex;
     gap: 8px;
