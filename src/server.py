@@ -243,6 +243,23 @@ def index():
     return (STATIC_PATH / "index.html").read_text(encoding="utf-8")
 
 
+@app.get("/share-handler", response_class=HTMLResponse)
+def share_handler():
+    """Serve the share handler page for PWA Share Target."""
+    return (STATIC_PATH / "share-handler.html").read_text(encoding="utf-8")
+
+
+@app.post("/share")
+async def share_target(title: str = "", text: str = "", url: str = ""):
+    """
+    Handle PWA Share Target POST requests.
+    Redirects to share-handler page with query params.
+    """
+    from fastapi.responses import RedirectResponse
+    params = f"?title={title}&text={text}&url={url}"
+    return RedirectResponse(url=f"/share-handler{params}", status_code=303)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

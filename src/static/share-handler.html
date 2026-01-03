@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adding Pin - Pinterest Archive</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#e60023">
+    <style>
+        .share-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .share-card {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+        }
+
+        .share-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .share-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .share-message {
+            color: #666;
+            margin-bottom: 24px;
+            font-size: 14px;
+            word-break: break-all;
+        }
+
+        .share-status {
+            padding: 12px 24px;
+            border-radius: 24px;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .share-status.loading {
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        .share-status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .share-status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .share-status.exists {
+            background: #fff3e0;
+            color: #ef6c00;
+        }
+
+        .share-actions {
+            margin-top: 24px;
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .share-btn {
+            padding: 12px 24px;
+            border-radius: 24px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+
+        .share-btn-primary {
+            background: #e60023;
+            color: white;
+        }
+
+        .share-btn-primary:hover {
+            background: #c4001d;
+        }
+
+        .share-btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .share-btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid #e0e0e0;
+            border-top-color: #e60023;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="share-container">
+        <div class="share-card">
+            <div class="share-icon" id="icon">📌</div>
+            <div class="share-title" id="title">Processing...</div>
+            <div class="share-message" id="message"></div>
+            <div class="share-status loading" id="status">
+                <div class="spinner"></div>
+                Saving pin...
+            </div>
+            <div class="share-actions" id="actions" style="display: none;">
+                <a href="/" class="share-btn share-btn-primary">View Archive</a>
+                <button class="share-btn share-btn-secondary" onclick="window.close()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function processShare() {
+            const params = new URLSearchParams(window.location.search);
+            const title = params.get('title') || '';
+            const text = params.get('text') || '';
+            const url = params.get('url') || '';
+            
+            const sharedContent = `${title} ${text} ${url}`;
+            document.getElementById('message').textContent = sharedContent.substring(0, 100) + (sharedContent.length > 100 ? '...' : '');
+            
+            // Extract Pinterest pin ID from URL
+            const pinMatch = sharedContent.match(/pin\/(\d+)/);
+            if (!pinMatch) {
+                showError('No Pinterest pin found in shared content');
+                return;
+            }
+            
+            const pinId = pinMatch[1];
+            document.getElementById('title').textContent = `Pin ${pinId}`;
+            
+            // Extract original image URL if present, or construct it
+            let originalUrl = null;
+            const originalsMatch = sharedContent.match(/(https:\/\/i\.pinimg\.com\/originals\/[^\s]+)/);
+            if (originalsMatch) {
+                originalUrl = originalsMatch[1];
+            }
+            
+            // If no original URL found, we need to fetch the pin page to get it
+            if (!originalUrl) {
+                // Try to extract file ID from any pinimg URL
+                const fileIdMatch = sharedContent.match(/pinimg\.com\/[^\/]+\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{2})\/([a-f0-9]{32})\.(\w+)/);
+                if (fileIdMatch) {
+                    const fileId = fileIdMatch[4];
+                    const ext = fileIdMatch[5];
+                    originalUrl = `https://i.pinimg.com/originals/${fileIdMatch[1]}/${fileIdMatch[2]}/${fileIdMatch[3]}/${fileId}.${ext}`;
+                }
+            }
+            
+            if (!originalUrl) {
+                showError('Could not extract image URL. Try sharing from the pin page.');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/pins', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        pin_id: pinId,
+                        original_url: originalUrl
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'added') {
+                    showSuccess(`Pin ${pinId} saved to archive!`);
+                } else if (data.status === 'exists') {
+                    showExists(`Pin ${pinId} already in archive`);
+                } else {
+                    showError(data.detail || 'Failed to save pin');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        }
+        
+        function showSuccess(message) {
+            document.getElementById('icon').textContent = '✅';
+            document.getElementById('status').className = 'share-status success';
+            document.getElementById('status').innerHTML = message;
+            document.getElementById('actions').style.display = 'flex';
+        }
+        
+        function showExists(message) {
+            document.getElementById('icon').textContent = '📋';
+            document.getElementById('status').className = 'share-status exists';
+            document.getElementById('status').innerHTML = message;
+            document.getElementById('actions').style.display = 'flex';
+        }
+        
+        function showError(message) {
+            document.getElementById('icon').textContent = '❌';
+            document.getElementById('status').className = 'share-status error';
+            document.getElementById('status').innerHTML = message;
+            document.getElementById('actions').style.display = 'flex';
+        }
+        
+        processShare();
+    </script>
+</body>
+</html>
