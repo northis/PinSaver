@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pinterest Archive</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <div class="header-top">
+            <h1>📌 Pinterest Archive</h1>
+            <div class="sort-controls">
+                <button class="sort-btn active" data-sort="newest">Newest</button>
+                <button class="sort-btn" data-sort="oldest">Oldest</button>
+                <button class="sort-btn" data-sort="random">Random</button>
+            </div>
+        </div>
+        <div class="stats" id="stats">Loading...</div>
+    </header>
+
+    <div class="container">
+        <div class="masonry" id="masonry"></div>
+        <div class="sentinel" id="sentinel"></div>
+        <div class="loading" id="loading">
+            <div class="loading-spinner"></div>
+            <div>Loading pins...</div>
+        </div>
+    </div>
+
+    <!-- Carousel modal -->
+    <div class="carousel-overlay" id="carouselOverlay">
+        <div class="carousel-container">
+            <button class="carousel-close" onclick="hideCarousel()" title="Close">✕</button>
+            <button class="carousel-btn carousel-btn-prev" id="carouselPrev" onclick="carouselPrev()" title="Previous">❮</button>
+            <div class="carousel-image-wrapper">
+                <img class="carousel-image" id="carouselImage" src="" alt="Pin image">
+            </div>
+            <button class="carousel-btn carousel-btn-next" id="carouselNext" onclick="carouselNext()" title="Next">❯</button>
+            <div class="carousel-info">
+                <span class="carousel-counter" id="carouselCounter">1 / 100</span>
+                <a class="carousel-link" id="carouselLink" href="#" target="_blank" rel="noopener noreferrer">Open on Pinterest ↗</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete confirmation modal -->
+    <div class="modal-overlay" id="deleteModal">
+        <div class="modal">
+            <h3>Delete Pin?</h3>
+            <p>Are you sure you want to delete pin <strong id="deletePinId"></strong> from the archive?</p>
+            <label class="modal-checkbox">
+                <input type="checkbox" id="deleteFileCheckbox">
+                Also delete the image file
+            </label>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" onclick="hideDeleteModal()">Cancel</button>
+                <button class="modal-btn modal-btn-delete" onclick="confirmDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
