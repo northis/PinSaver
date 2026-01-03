@@ -27,10 +27,25 @@ cd PinSaver
 ### 2. Install Python dependencies
 
 ```bash
-pip install fastapi uvicorn httpx pillow
+pip install -r src/requirements.txt
 ```
 
-### 3. Initialize the database
+### 3. Configure environment
+
+Copy the example environment file and adjust if needed:
+
+```bash
+cp src/.env.example src/.env
+```
+
+Edit `src/.env` to configure:
+
+```env
+HOST=0.0.0.0
+PORT=8000
+```
+
+### 4. Initialize the database
 
 ```bash
 python src/models.py
@@ -38,7 +53,7 @@ python src/models.py
 
 This creates `pins.db` SQLite database and `originals/` folder for images.
 
-### 4. Start the server
+### 5. Start the server
 
 ```bash
 python src/server.py
@@ -87,6 +102,9 @@ PinSaver/
 ├── src/
 │   ├── server.py          # FastAPI server
 │   ├── models.py          # Database models
+│   ├── requirements.txt   # Python dependencies
+│   ├── .env               # Environment configuration (create from .env.example)
+│   ├── .env.example       # Example environment file
 │   └── static/
 │       ├── index.html     # Main web interface
 │       ├── styles.css     # Styles

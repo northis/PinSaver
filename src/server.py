@@ -1,6 +1,7 @@
 """
 FastAPI server for Pinterest archive viewer.
 """
+import os
 import re
 import sqlite3
 import time
@@ -8,7 +9,8 @@ import httpx
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Query, HTTPException
+from dotenv import load_dotenv
+from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,18 +18,39 @@ from pydantic import BaseModel
 
 from models import get_db_path, Pin, insert_pin, pin_exists
 
+load_dotenv()
+
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8000"))
+
 app = FastAPI(title="Pinterest Archive Viewer")
 
 STATIC_PATH = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://pinterest.com", "https://www.pinterest.com", "https://ru.pinterest.com"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def is_pinterest_origin(origin: str) -> bool:
+    """Check if origin is a valid Pinterest domain (any subdomain)."""
+    if not origin:
+        return False
+    import re
+    return bool(re.match(r'^https://([a-z0-9-]+\.)?pinterest\.com$', origin))
+
+
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    """Custom CORS middleware to support all Pinterest subdomains."""
+    origin = request.headers.get("origin", "")
+    
+    response = await call_next(request)
+    
+    if is_pinterest_origin(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    return response
 
 BASE_PATH = Path(__file__).parent.parent
 ORIGINALS_PATH = BASE_PATH / "originals"
@@ -262,4 +285,4 @@ async def share_target(title: str = "", text: str = "", url: str = ""):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=HOST, port=PORT)
