@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Pinterest Archive Saver",
+  "version": "1.0.0",
+  "description": "Save Pinterest pins to your local archive",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.pinterest.com/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.pinterest.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html"
+}

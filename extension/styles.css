@@ -1,0 +1,65 @@
+/**
+ * Pinterest Archive Saver - Notification Styles
+ */
+
+.pa-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    background: #1a1a1a;
+    color: white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    transform: translateX(120%);
+    transition: transform 0.3s ease;
+    max-width: 320px;
+}
+
+.pa-notification-show {
+    transform: translateX(0);
+}
+
+.pa-notification-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.pa-notification-success .pa-notification-icon {
+    background: #00c853;
+}
+
+.pa-notification-error .pa-notification-icon {
+    background: #ff1744;
+}
+
+.pa-notification-exists .pa-notification-icon {
+    background: #2196f3;
+}
+
+.pa-notification-loading .pa-notification-icon {
+    background: #ff9800;
+    animation: pa-pulse 1s ease-in-out infinite;
+}
+
+@keyframes pa-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.pa-notification-message {
+    flex: 1;
+    line-height: 1.4;
+}
