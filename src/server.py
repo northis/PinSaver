@@ -158,7 +158,9 @@ async def add_pin(request: AddPinRequest):
         Dictionary with status and pin info.
     """
     conn = get_db_connection()
+    cursor = conn.cursor()
     
+    # Check if pin_id already exists
     if pin_exists(conn, request.pin_id):
         conn.close()
         return {
@@ -174,16 +176,45 @@ async def add_pin(request: AddPinRequest):
     file_id = match.group(1)
     file_extension = match.group(2)
     
+    # Check if file_id already exists (same image, different pin)
+    cursor.execute("SELECT pin_id FROM pins WHERE file_id = ?", (file_id,))
+    existing_by_file = cursor.fetchone()
+    if existing_by_file:
+        conn.close()
+        return {
+            "status": "exists",
+            "message": f"Image already exists in archive (pin {existing_by_file['pin_id']})"
+        }
+    
     file_path = ORIGINALS_PATH / f"{file_id}.{file_extension}"
     
     if not file_path.exists():
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(request.original_url)
-                response.raise_for_status()
                 
-                file_path.write_bytes(response.content)
-        except Exception as e:
+                # If original fails (HEIC or unavailable), try fallback sizes
+                if response.status_code in (403, 404) or file_extension.lower() == 'heic':
+                    fallback_sizes = ['736x', '564x', '474x', '236x']
+                    downloaded = False
+                    
+                    for size in fallback_sizes:
+                        fallback_url = f"https://i.pinimg.com/{size}/{file_id[:2]}/{file_id[2:4]}/{file_id[4:6]}/{file_id}.jpg"
+                        fallback_response = await client.get(fallback_url)
+                        if fallback_response.status_code == 200:
+                            file_extension = 'jpg'
+                            file_path = ORIGINALS_PATH / f"{file_id}.jpg"
+                            file_path.write_bytes(fallback_response.content)
+                            downloaded = True
+                            break
+                    
+                    if not downloaded:
+                        conn.close()
+                        raise HTTPException(status_code=500, detail="Failed to download image: no available format")
+                else:
+                    response.raise_for_status()
+                    file_path.write_bytes(response.content)
+        except httpx.HTTPError as e:
             conn.close()
             raise HTTPException(status_code=500, detail=f"Failed to download image: {str(e)}")
     
@@ -211,18 +242,25 @@ async def add_pin(request: AddPinRequest):
     }
 
 
+class PinCheckItem(BaseModel):
+    """Single pin item for batch check."""
+    pin_id: str
+    file_id: Optional[str] = None
+
+
 class CheckPinsRequest(BaseModel):
     """Request model for checking multiple pins."""
-    pin_ids: list[str]
+    pins: list[PinCheckItem]
 
 
 @app.post("/api/pins/check")
 def check_pins_exist(request: CheckPinsRequest):
     """
     Check which pins from a list already exist in the archive.
+    Checks both pin_id and file_id - if either matches, pin is considered existing.
     
     Args:
-        request: CheckPinsRequest with list of pin IDs to check.
+        request: CheckPinsRequest with list of pins containing pin_id and file_id.
     
     Returns:
         Dictionary with existing pin IDs.
@@ -231,10 +269,18 @@ def check_pins_exist(request: CheckPinsRequest):
     cursor = conn.cursor()
     
     existing = []
-    for pin_id in request.pin_ids:
-        cursor.execute("SELECT 1 FROM pins WHERE pin_id = ?", (pin_id,))
+    for pin in request.pins:
+        # Check by pin_id
+        cursor.execute("SELECT 1 FROM pins WHERE pin_id = ?", (pin.pin_id,))
         if cursor.fetchone():
-            existing.append(pin_id)
+            existing.append(pin.pin_id)
+            continue
+        
+        # Check by file_id
+        if pin.file_id:
+            cursor.execute("SELECT 1 FROM pins WHERE file_id = ?", (pin.file_id,))
+            if cursor.fetchone():
+                existing.append(pin.pin_id)
     
     conn.close()
     return {"existing": existing}

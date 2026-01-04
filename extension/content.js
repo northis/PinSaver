@@ -10,7 +10,7 @@
     const DEFAULT_SERVER_URL = 'http://localhost:8000';
     let serverUrl = DEFAULT_SERVER_URL;
     let archivedPinIds = new Set();
-    let pendingPinIds = new Set();
+    let pendingPins = new Map(); // pin_id -> file_id
     let checkDebounceTimer = null;
 
     // Load server URL from storage
@@ -33,11 +33,13 @@
     /**
      * Build original URL from file ID
      * @param {string} fileId - 32-character file hash
-     * @param {string} extension - File extension
+     * @param {string} extension - File extension (will use jpg for unsupported formats)
      * @returns {string} Original image URL
      */
     function buildOriginalUrl(fileId, extension) {
-        return `https://i.pinimg.com/originals/${fileId.slice(0,2)}/${fileId.slice(2,4)}/${fileId.slice(4,6)}/${fileId}.${extension}`;
+        // Use jpg for unsupported formats like heic - server will handle fallback
+        const safeExt = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension.toLowerCase()) ? extension : 'jpg';
+        return `https://i.pinimg.com/originals/${fileId.slice(0,2)}/${fileId.slice(2,4)}/${fileId.slice(4,6)}/${fileId}.${safeExt}`;
     }
 
     /**
@@ -310,6 +312,22 @@
     }
 
     /**
+     * Extract file ID from a pin element on grid
+     * @param {Element} element - Pin element
+     * @returns {string|null} File ID (32-char hash) or null
+     */
+    function getFileIdFromPinElement(element) {
+        const img = element.querySelector('img[src*="pinimg.com"]');
+        if (img) {
+            const fileInfo = extractFileId(img.src);
+            if (fileInfo) {
+                return fileInfo.fileId;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Extract original image URL from a pin element on grid
      * @param {Element} element - Pin element
      * @returns {string|null} Original image URL or null
@@ -327,16 +345,18 @@
 
     /**
      * Check which pins are archived (batch request)
-     * @param {string[]} pinIds - Array of pin IDs to check
+     * @param {Map} pinsMap - Map of pin_id -> file_id
      */
-    async function checkArchivedPins(pinIds) {
-        if (pinIds.length === 0) return;
+    async function checkArchivedPins(pinsMap) {
+        if (pinsMap.size === 0) return;
+        
+        const pins = Array.from(pinsMap.entries()).map(([pin_id, file_id]) => ({ pin_id, file_id }));
         
         try {
             const response = await fetch(`${serverUrl}/api/pins/check`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pin_ids: pinIds })
+                body: JSON.stringify({ pins })
             });
             
             if (response.ok) {
@@ -357,10 +377,10 @@
             clearTimeout(checkDebounceTimer);
         }
         checkDebounceTimer = setTimeout(() => {
-            const newPinIds = Array.from(pendingPinIds);
-            pendingPinIds.clear();
-            if (newPinIds.length > 0) {
-                checkArchivedPins(newPinIds);
+            const pinsToCheck = new Map(pendingPins);
+            pendingPins.clear();
+            if (pinsToCheck.size > 0) {
+                checkArchivedPins(pinsToCheck);
             }
         }, 500);
     }
@@ -478,9 +498,12 @@
                 container.style.position = 'relative';
             }
             
+            // Extract file_id from image
+            const fileId = getFileIdFromPinElement(element);
+            
             // Add to pending check if not already known
             if (!archivedPinIds.has(pinId)) {
-                pendingPinIds.add(pinId);
+                pendingPins.set(pinId, fileId);
             }
             
             // Create and add icon
@@ -490,7 +513,7 @@
         });
         
         // Schedule check for new pins
-        if (pendingPinIds.size > 0) {
+        if (pendingPins.size > 0) {
             scheduleArchiveCheck();
         }
     }
