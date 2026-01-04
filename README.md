@@ -51,7 +51,7 @@ PORT=8000
 python src/models.py
 ```
 
-This creates `pins.db` SQLite database and `originals/` folder for images.
+This creates `pinterest_archive.db` SQLite database and `originals/` folder for images.
 
 ### 5. Start the server
 
