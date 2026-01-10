@@ -108,11 +108,13 @@ def get_pins(
         order_clause = "ORDER BY source_date ASC, id ASC"
     elif sort == "random":
         order_clause = "ORDER BY RANDOM()"
+    elif sort == "top":
+        order_clause = "ORDER BY rating DESC, source_date DESC, id DESC"
     else:
         order_clause = "ORDER BY source_date DESC, id DESC"
     
     cursor.execute(f"""
-        SELECT id, pin_id, file_id, file_extension, pinterest_url, original_url, source_date
+        SELECT id, pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating
         FROM pins
         {order_clause}
         LIMIT ? OFFSET ?
@@ -128,6 +130,7 @@ def get_pins(
             "pinterest_url": row["pinterest_url"],
             "original_url": row["original_url"],
             "source_date": row["source_date"],
+            "rating": row["rating"] or 0,
             "image_url": f"/images/{row['file_id']}.{row['file_extension']}"
         })
     
@@ -161,11 +164,16 @@ async def add_pin(request: AddPinRequest):
     cursor = conn.cursor()
     
     # Check if pin_id already exists
-    if pin_exists(conn, request.pin_id):
+    cursor.execute("SELECT id, rating FROM pins WHERE pin_id = ?", (request.pin_id,))
+    existing_by_pin = cursor.fetchone()
+    if existing_by_pin:
+        # Increment rating for duplicate attempt
+        cursor.execute("UPDATE pins SET rating = rating + 1 WHERE id = ?", (existing_by_pin['id'],))
+        conn.commit()
         conn.close()
         return {
             "status": "exists",
-            "message": f"Pin {request.pin_id} already exists in archive"
+            "message": f"Pin {request.pin_id} already exists in archive (rating +1)"
         }
     
     match = re.search(r'/([a-f0-9]{32})\.(\w+)(?:\?|$)', request.original_url)
@@ -177,13 +185,16 @@ async def add_pin(request: AddPinRequest):
     file_extension = match.group(2)
     
     # Check if file_id already exists (same image, different pin)
-    cursor.execute("SELECT pin_id FROM pins WHERE file_id = ?", (file_id,))
+    cursor.execute("SELECT id, pin_id, rating FROM pins WHERE file_id = ?", (file_id,))
     existing_by_file = cursor.fetchone()
     if existing_by_file:
+        # Increment rating for duplicate attempt
+        cursor.execute("UPDATE pins SET rating = rating + 1 WHERE id = ?", (existing_by_file['id'],))
+        conn.commit()
         conn.close()
         return {
             "status": "exists",
-            "message": f"Image already exists in archive (pin {existing_by_file['pin_id']})"
+            "message": f"Image already exists in archive (pin {existing_by_file['pin_id']}, rating +1)"
         }
     
     file_path = ORIGINALS_PATH / f"{file_id}.{file_extension}"

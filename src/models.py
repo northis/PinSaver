@@ -17,6 +17,7 @@ class Pin:
     original_url: str
     source_date: int
     id: Optional[int] = None
+    rating: int = 0
 
 
 def get_db_path() -> Path:
@@ -45,12 +46,19 @@ def init_db(db_path: Optional[Path] = None) -> None:
             file_extension TEXT NOT NULL DEFAULT 'jpg',
             pinterest_url TEXT NOT NULL,
             original_url TEXT NOT NULL,
-            source_date INTEGER
+            source_date INTEGER,
+            rating INTEGER NOT NULL DEFAULT 0
         )
     """)
     
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pin_id ON pins(pin_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_id ON pins(file_id)")
+    
+    # Migration: add rating column if it doesn't exist
+    cursor.execute("PRAGMA table_info(pins)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'rating' not in columns:
+        cursor.execute("ALTER TABLE pins ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
     
     conn.commit()
     conn.close()
@@ -88,9 +96,9 @@ def insert_pin(conn: sqlite3.Connection, pin: Pin) -> bool:
     
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO pins (pin_id, file_id, file_extension, pinterest_url, original_url, source_date)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (pin.pin_id, pin.file_id, pin.file_extension, pin.pinterest_url, pin.original_url, pin.source_date))
+        INSERT INTO pins (pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (pin.pin_id, pin.file_id, pin.file_extension, pin.pinterest_url, pin.original_url, pin.source_date, pin.rating))
     
     return True
 

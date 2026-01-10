@@ -170,6 +170,12 @@ function createPinCard(pin, colWidth) {
         <div class="pin-date">${formatDate(pin.source_date)}</div>
     `;
 
+    const rating = parseInt(pin.rating) || 0;
+    const ratingBadge = document.createElement('div');
+    ratingBadge.className = 'rating-badge';
+    ratingBadge.title = rating > 0 ? `Saved ${rating + 1} times` : 'Saved once';
+    ratingBadge.innerHTML = rating > 0 ? `❤️ ${rating}` : '🤍';
+
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'delete-btn';
     deleteBtn.innerHTML = '✕';
@@ -193,6 +199,7 @@ function createPinCard(pin, colWidth) {
 
     link.appendChild(img);
     card.appendChild(link);
+    card.appendChild(ratingBadge);
     card.appendChild(deleteBtn);
     card.appendChild(viewBtn);
     card.appendChild(info);
