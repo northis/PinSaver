@@ -21,6 +21,29 @@
     });
 
     /**
+     * Make API request via background script to bypass PNA restrictions
+     * @param {string} url - API URL
+     * @param {Object} options - Fetch options
+     * @returns {Promise<Object>} Response data
+     */
+    async function apiRequest(url, options = {}) {
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(
+                { type: 'API_REQUEST', url, options },
+                (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (response.success) {
+                        resolve(response.data);
+                    } else {
+                        reject(new Error(response.error));
+                    }
+                }
+            );
+        });
+    }
+
+    /**
      * Extract pin ID from URL
      * @param {string} url - URL to extract pin ID from
      * @returns {string|null} Pin ID or null
@@ -176,7 +199,7 @@
         showNotification('Saving to archive...', 'loading');
 
         try {
-            const response = await fetch(`${serverUrl}/api/pins`, {
+            const result = await apiRequest(`${serverUrl}/api/pins`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -186,13 +209,6 @@
                     original_url: originalUrl
                 })
             });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Server error');
-            }
-
-            const result = await response.json();
 
             if (result.status === 'exists') {
                 showNotification('Pin already in archive', 'exists');
@@ -353,17 +369,14 @@
         const pins = Array.from(pinsMap.entries()).map(([pin_id, file_id]) => ({ pin_id, file_id }));
         
         try {
-            const response = await fetch(`${serverUrl}/api/pins/check`, {
+            const data = await apiRequest(`${serverUrl}/api/pins/check`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pins })
             });
             
-            if (response.ok) {
-                const data = await response.json();
-                data.existing.forEach(id => archivedPinIds.add(id));
-                updateArchiveIcons();
-            }
+            data.existing.forEach(id => archivedPinIds.add(id));
+            updateArchiveIcons();
         } catch (error) {
             console.error('Pinterest Archive: Failed to check pins', error);
         }
@@ -435,7 +448,7 @@
         
         // Save to archive
         try {
-            const response = await fetch(`${serverUrl}/api/pins`, {
+            const result = await apiRequest(`${serverUrl}/api/pins`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -444,24 +457,19 @@
                 })
             });
             
-            if (response.ok) {
-                const result = await response.json();
-                archivedPinIds.add(pinId);
-                
-                // Update icon to archived state
-                icon.innerHTML = '✓';
-                icon.classList.remove('pa-loading');
-                icon.classList.add('pa-archived');
-                icon.title = 'In archive';
-                icon.removeEventListener('click', handleArchiveIconClick);
-                
-                if (result.status === 'exists') {
-                    showNotification(`Pin ${pinId} already in archive`, 'exists');
-                } else {
-                    showNotification(`Pin ${pinId} saved!`, 'success');
-                }
+            archivedPinIds.add(pinId);
+            
+            // Update icon to archived state
+            icon.innerHTML = '✓';
+            icon.classList.remove('pa-loading');
+            icon.classList.add('pa-archived');
+            icon.title = 'In archive';
+            icon.removeEventListener('click', handleArchiveIconClick);
+            
+            if (result.status === 'exists') {
+                showNotification(`Pin ${pinId} already in archive`, 'exists');
             } else {
-                throw new Error('Server error');
+                showNotification(`Pin ${pinId} saved!`, 'success');
             }
         } catch (error) {
             // Revert icon state
