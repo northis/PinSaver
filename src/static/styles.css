@@ -66,6 +66,16 @@ header h1 {
     border-color: white;
 }
 
+.sort-btn.deleted-btn {
+    border-color: rgba(255, 100, 100, 0.5);
+}
+
+.sort-btn.deleted-btn.active {
+    background: #ff6b6b;
+    color: white;
+    border-color: #ff6b6b;
+}
+
 .stats {
     font-size: 14px;
     opacity: 0.9;

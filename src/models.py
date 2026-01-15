@@ -18,6 +18,7 @@ class Pin:
     source_date: int
     id: Optional[int] = None
     rating: int = 0
+    is_deleted: bool = False
 
 
 def get_db_path() -> Path:
@@ -47,7 +48,8 @@ def init_db(db_path: Optional[Path] = None) -> None:
             pinterest_url TEXT NOT NULL,
             original_url TEXT NOT NULL,
             source_date INTEGER,
-            rating INTEGER NOT NULL DEFAULT 0
+            rating INTEGER NOT NULL DEFAULT 0,
+            is_deleted INTEGER NOT NULL DEFAULT 0
         )
     """)
     
@@ -59,6 +61,8 @@ def init_db(db_path: Optional[Path] = None) -> None:
     columns = [col[1] for col in cursor.fetchall()]
     if 'rating' not in columns:
         cursor.execute("ALTER TABLE pins ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
+    if 'is_deleted' not in columns:
+        cursor.execute("ALTER TABLE pins ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
     
     conn.commit()
     conn.close()

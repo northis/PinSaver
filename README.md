@@ -7,7 +7,9 @@ A self-hosted solution for archiving Pinterest pins with original quality images
 - **Web Interface**: Browse your archived pins with masonry layout, infinite scroll, and fullscreen carousel
 - **Chrome Extension**: Save pins directly from Pinterest with one click
 - **Favorites Import**: Browse your Pinterest favorites and save pins with one click via archive status icons
-- **Sorting**: View pins by newest, oldest, or random order
+- **Sorting**: View pins by newest, oldest, top rated, or random order
+- **Rating System**: Tracks duplicate save attempts - pins saved multiple times get higher rating
+- **Deleted Pins Detection**: Check which pins were removed from Pinterest and filter them
 - **Delete Management**: Remove pins from archive with optional file deletion
 
 ## Requirements
@@ -67,7 +69,9 @@ Server runs on `http://localhost:8000` by default.
 
 Open `http://localhost:8000` in your browser to view archived pins.
 
-- **Sort controls**: Switch between Newest, Oldest, and Random order
+- **Sort controls**: Switch between Newest, Oldest, Top (by rating), and Random order
+- **Deleted filter**: Toggle the Deleted button to show only pins removed from Pinterest
+- **Rating badge**: Each pin shows a heart icon; pins saved multiple times display a counter
 - **Carousel**: Click any pin to view in fullscreen with navigation
 - **Delete**: Hover over a pin and click the X button to delete
 
@@ -88,11 +92,26 @@ Open `http://localhost:8000` in your browser to view archived pins.
 3. Click the icon on any unarchived pin to save it to your archive
 4. The icon turns green when the pin is successfully saved
 
+### Checking for Deleted Pins
+
+Run the `updateDelete.py` script periodically to check which pins have been removed from Pinterest:
+
+```bash
+# Install Playwright (first time only)
+pip install playwright
+playwright install chromium
+
+# Run the check
+python src/updateDelete.py
+```
+
+The script uses headless Chromium to visit each pin URL and marks deleted ones in the database. Deleted pins can then be viewed using the "Deleted" filter button in the web interface.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/pins` | Get paginated pins list (params: `offset`, `limit`, `sort`) |
+| GET | `/api/pins` | Get paginated pins list (params: `offset`, `limit`, `sort`, `deleted`) |
 | POST | `/api/pins` | Add new pin (body: `pin_id`, `original_url`) |
 | POST | `/api/pins/check` | Check if pins exist in archive (body: `pin_ids[]`) |
 | DELETE | `/api/pins/{pin_id}` | Delete pin (param: `delete_file`) |
@@ -105,6 +124,8 @@ PinSaver/
 ├── src/
 │   ├── server.py          # FastAPI server
 │   ├── models.py          # Database models
+│   ├── updateDelete.py    # Script to check for deleted pins on Pinterest
+│   ├── migrate_duplicates.py  # Migration script for consolidating duplicates
 │   ├── requirements.txt   # Python dependencies
 │   └── static/
 │       ├── index.html     # Main web interface

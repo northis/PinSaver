@@ -85,7 +85,8 @@ def get_db_connection() -> sqlite3.Connection:
 def get_pins(
     offset: int = Query(0, ge=0, description="Number of pins to skip"),
     limit: int = Query(50, ge=1, le=100, description="Number of pins to return"),
-    sort: str = Query("newest", description="Sort order: newest, oldest, or random")
+    sort: str = Query("newest", description="Sort order: newest, oldest, top, random, or deleted"),
+    deleted: bool = Query(False, description="Show only deleted pins")
 ):
     """
     Get paginated list of pins with configurable sort order.
@@ -93,7 +94,8 @@ def get_pins(
     Args:
         offset: Number of pins to skip.
         limit: Number of pins to return (max 100).
-        sort: Sort order - 'newest' (default), 'oldest', or 'random'.
+        sort: Sort order - 'newest' (default), 'oldest', 'top', 'random', or 'deleted'.
+        deleted: If True, show only deleted pins.
     
     Returns:
         Dictionary with pins array and total count.
@@ -101,7 +103,10 @@ def get_pins(
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT COUNT(*) as total FROM pins")
+    # Filter by deleted status
+    where_clause = "WHERE is_deleted = 1" if deleted else "WHERE is_deleted = 0"
+    
+    cursor.execute(f"SELECT COUNT(*) as total FROM pins {where_clause}")
     total = cursor.fetchone()["total"]
     
     if sort == "oldest":
@@ -114,8 +119,9 @@ def get_pins(
         order_clause = "ORDER BY source_date DESC, id DESC"
     
     cursor.execute(f"""
-        SELECT id, pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating
+        SELECT id, pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating, is_deleted
         FROM pins
+        {where_clause}
         {order_clause}
         LIMIT ? OFFSET ?
     """, (limit, offset))
@@ -131,6 +137,7 @@ def get_pins(
             "original_url": row["original_url"],
             "source_date": row["source_date"],
             "rating": row["rating"] or 0,
+            "is_deleted": bool(row["is_deleted"]),
             "image_url": f"/images/{row['file_id']}.{row['file_extension']}"
         })
     

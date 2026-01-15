@@ -12,6 +12,7 @@ let columnHeights = [];
 let renderedCount = 0;
 let imageHeights = new Map();
 let currentSort = 'newest';
+let showDeleted = false;
 
 const masonry = document.getElementById('masonry');
 const sentinel = document.getElementById('sentinel');
@@ -104,7 +105,7 @@ async function loadMoreForCarousel() {
     carouselLoading = true;
 
     try {
-        const response = await fetch(`/api/pins?offset=${offset}&limit=${BATCH_SIZE}&sort=${currentSort}`);
+        const response = await fetch(`/api/pins?offset=${offset}&limit=${BATCH_SIZE}&sort=${currentSort}&deleted=${showDeleted}`);
         const data = await response.json();
 
         totalPins = data.total;
@@ -316,7 +317,7 @@ async function loadPins() {
     loadingEl.style.display = 'block';
 
     try {
-        const response = await fetch(`/api/pins?offset=${offset}&limit=${BATCH_SIZE}&sort=${currentSort}`);
+        const response = await fetch(`/api/pins?offset=${offset}&limit=${BATCH_SIZE}&sort=${currentSort}&deleted=${showDeleted}`);
         const data = await response.json();
         
         totalPins = data.total;
@@ -477,14 +478,21 @@ if ('serviceWorker' in navigator) {
 
 // Sort controls
 function changeSort(newSort) {
-    if (newSort === currentSort) return;
-    
-    currentSort = newSort;
-    
-    // Update button states
-    document.querySelectorAll('.sort-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.sort === newSort);
-    });
+    // Handle "deleted" as a filter toggle, not a sort
+    if (newSort === 'deleted') {
+        showDeleted = !showDeleted;
+        document.querySelector('.deleted-btn').classList.toggle('active', showDeleted);
+    } else {
+        if (newSort === currentSort && !showDeleted) return;
+        currentSort = newSort;
+        showDeleted = false;
+        
+        // Update button states
+        document.querySelectorAll('.sort-btn:not(.deleted-btn)').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.sort === newSort);
+        });
+        document.querySelector('.deleted-btn').classList.remove('active');
+    }
     
     // Reset and reload
     allPins = [];
