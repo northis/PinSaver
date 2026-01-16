@@ -172,10 +172,16 @@ function createPinCard(pin, colWidth) {
     `;
 
     const rating = parseInt(pin.rating) || 0;
+    const isDeleted = pin.is_deleted;
     const ratingBadge = document.createElement('div');
-    ratingBadge.className = 'rating-badge';
-    ratingBadge.title = rating > 0 ? `Saved ${rating + 1} times` : 'Saved once';
-    ratingBadge.innerHTML = rating > 0 ? `❤️ ${rating}` : '🤍';
+    ratingBadge.className = 'rating-badge' + (isDeleted ? ' deleted' : '');
+    
+    let badgeContent = rating > 0 ? `❤️ ${rating}` : '🤍';
+    if (isDeleted) {
+        badgeContent += ' 🚫';
+    }
+    ratingBadge.innerHTML = badgeContent;
+    ratingBadge.title = (rating > 0 ? `Saved ${rating + 1} times` : 'Saved once') + (isDeleted ? ' • Deleted from Pinterest' : '');
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'delete-btn';

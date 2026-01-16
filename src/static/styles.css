@@ -153,6 +153,11 @@ header h1 {
     z-index: 1;
 }
 
+.rating-badge.deleted {
+    background: rgba(255, 100, 100, 0.9);
+    color: white;
+}
+
 .pin-card .delete-btn {
     position: absolute;
     top: 8px;

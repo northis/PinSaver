@@ -20,20 +20,23 @@ async def check_pin_deleted(page, pinterest_url: str) -> bool:
         True if pin is deleted (page shows error or redirect), False otherwise.
     """
     try:
-        response = await page.goto(pinterest_url, wait_until='domcontentloaded', timeout=15000)
+        response = await page.goto(pinterest_url, wait_until='networkidle', timeout=30000)
         
         # Check for 404 or error status
         if response and response.status >= 400:
             return True
         
-        # Check for "Pin not found" or similar error messages on page
-        content = await page.content()
-        if 'Sorry! This Pin was deleted' in content or 'This Pin has been removed' in content:
-            return True
+        # Wait for any remaining redirects to complete
+        await page.wait_for_load_state('networkidle')
         
         # Check if redirected away from pin page (deleted pins redirect to home)
         current_url = page.url
         if '/pin/' not in current_url:
+            return True
+        
+        # Check for "Pin not found" or similar error messages on page
+        content = await page.content()
+        if 'Sorry! This Pin was deleted' in content or 'This Pin has been removed' in content:
             return True
         
         return False
@@ -58,6 +61,7 @@ async def update_deleted_pins():
         SELECT id, pin_id, pinterest_url
         FROM pins
         WHERE is_deleted = 0
+        ORDER BY id
     """)
     
     pins = cursor.fetchall()
@@ -92,7 +96,7 @@ async def update_deleted_pins():
                 print(f"[{i+1}/{len(pins)}] Pin {pin['pin_id']} - OK")
             
             # Small delay to avoid rate limiting
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.1)
         
         await browser.close()
     

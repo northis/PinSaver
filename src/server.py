@@ -109,7 +109,10 @@ def get_pins(
     cursor = conn.cursor()
     
     # Filter by deleted status
-    where_clause = "WHERE is_deleted = 1" if deleted else "WHERE is_deleted = 0"
+    if deleted:
+        where_clause = "WHERE is_deleted = 1"
+    else:
+        where_clause = ""
     
     cursor.execute(f"SELECT COUNT(*) as total FROM pins {where_clause}")
     total = cursor.fetchone()["total"]
