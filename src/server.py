@@ -161,6 +161,33 @@ def get_pins(
     }
 
 
+@app.get("/api/pins/sync")
+def get_pins_for_sync():
+    """
+    Get list of all non-deleted pin IDs for syncing to Pinterest favorites.
+    
+    Returns:
+        Dictionary with pin_ids array and total count.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT pin_id
+        FROM pins
+        WHERE is_deleted = 0
+        ORDER BY source_date DESC, id DESC
+    """)
+    
+    pin_ids = [row["pin_id"] for row in cursor.fetchall()]
+    conn.close()
+    
+    return {
+        "pin_ids": pin_ids,
+        "total": len(pin_ids)
+    }
+
+
 @app.post("/api/pins")
 async def add_pin(request: AddPinRequest):
     """
@@ -200,10 +227,22 @@ async def add_pin(request: AddPinRequest):
     file_extension = match.group(2)
     
     # Check if file_id already exists (same image, different pin)
-    cursor.execute("SELECT id, pin_id, rating FROM pins WHERE file_id = ?", (file_id,))
+    cursor.execute("SELECT id, pin_id, rating, is_deleted FROM pins WHERE file_id = ?", (file_id,))
     existing_by_file = cursor.fetchone()
     if existing_by_file:
-        # Increment rating for duplicate attempt
+        # If the existing pin was deleted, restore it with new pin_id (don't increment rating)
+        if existing_by_file['is_deleted']:
+            cursor.execute(
+                "UPDATE pins SET pin_id = ?, pinterest_url = ?, is_deleted = 0 WHERE id = ?",
+                (request.pin_id, f"https://pinterest.com/pin/{request.pin_id}/", existing_by_file['id'])
+            )
+            conn.commit()
+            conn.close()
+            return {
+                "status": "restored",
+                "message": f"Pin restored with new ID {request.pin_id} (was {existing_by_file['pin_id']})"
+            }
+        # Otherwise increment rating for duplicate attempt
         cursor.execute("UPDATE pins SET rating = rating + 1 WHERE id = ?", (existing_by_file['id'],))
         conn.commit()
         conn.close()

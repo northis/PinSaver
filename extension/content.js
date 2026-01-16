@@ -573,6 +573,99 @@
     }
 
     /**
+     * Create and add sync button to page
+     */
+    function addSyncButton() {
+        if (document.querySelector('.pa-sync-button')) return;
+
+        const button = document.createElement('button');
+        button.className = 'pa-sync-button';
+        button.innerHTML = '<span class="pa-sync-icon">🔄</span> Sync to Pinterest';
+        button.title = 'Add archived pins to Pinterest favorites';
+
+        button.addEventListener('click', handleSyncClick);
+        document.body.appendChild(button);
+    }
+
+    /**
+     * Show sync status message
+     * @param {string} message - Status message
+     * @param {string} type - 'info', 'success', or 'error'
+     */
+    function showSyncStatus(message, type = 'info') {
+        let statusEl = document.querySelector('.pa-sync-status');
+        
+        if (!statusEl) {
+            statusEl = document.createElement('div');
+            statusEl.className = 'pa-sync-status';
+            document.body.appendChild(statusEl);
+        }
+
+        statusEl.textContent = message;
+        statusEl.className = 'pa-sync-status';
+        
+        if (type === 'success') {
+            statusEl.classList.add('pa-sync-success');
+        } else if (type === 'error') {
+            statusEl.classList.add('pa-sync-error');
+        }
+
+        // Auto-hide after 5 seconds for success/error
+        if (type !== 'info') {
+            setTimeout(() => {
+                statusEl.remove();
+            }, 5000);
+        }
+    }
+
+    /**
+     * Handle sync button click
+     */
+    async function handleSyncClick() {
+        const button = document.querySelector('.pa-sync-button');
+        if (!button || button.disabled) return;
+
+        // Get settings
+        const settings = await new Promise(resolve => {
+            chrome.storage.sync.get(['serverUrl'], resolve);
+        });
+
+        const serverUrlValue = settings.serverUrl || 'http://localhost:8000';
+
+        button.disabled = true;
+        button.innerHTML = '<span class="pa-sync-icon">⏳</span> Syncing...';
+        showSyncStatus('Fetching pins from archive...');
+
+        try {
+            // Get all non-deleted pins from archive server via background script
+            const data = await apiRequest(`${serverUrlValue}/api/pins/sync`, {
+                method: 'GET'
+            });
+
+            const pinIds = data.pin_ids;
+
+            if (pinIds.length === 0) {
+                showSyncStatus('No pins to sync', 'success');
+                button.disabled = false;
+                button.innerHTML = '<span class="pa-sync-icon">🔄</span> Sync to Pinterest';
+                return;
+            }
+
+            showSyncStatus(`Syncing ${pinIds.length} pins...`);
+
+            const result = await syncPinsToPinterest(pinIds);
+
+            showSyncStatus(`Done: ${result.added} added, ${result.failed} failed`, 'success');
+
+        } catch (error) {
+            showSyncStatus(`Error: ${error.message}`, 'error');
+        }
+
+        button.disabled = false;
+        button.innerHTML = '<span class="pa-sync-icon">🔄</span> Sync to Pinterest';
+    }
+
+    /**
      * Initialize the extension
      */
     function init() {
@@ -583,6 +676,9 @@
         if (isProfilePage()) {
             addArchiveIcons();
         }
+
+        // Add sync button to all Pinterest pages
+        addSyncButton();
         
         console.log('Pinterest Archive Saver initialized');
     }
@@ -593,5 +689,141 @@
     } else {
         init();
     }
+
+    /**
+     * Generate UUID v4
+     * @returns {string} UUID string
+     */
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    /**
+     * Get CSRF token from cookies
+     * @returns {string} CSRF token or empty string
+     */
+    function getCSRFToken() {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+    }
+
+    /**
+     * Generate random hex string for tracing
+     * @param {number} length - Length of hex string
+     * @returns {string} Random hex string
+     */
+    function generateTraceId(length = 16) {
+        let result = '';
+        const chars = '0123456789abcdef';
+        for (let i = 0; i < length; i++) {
+            result += chars[Math.floor(Math.random() * chars.length)];
+        }
+        return result;
+    }
+
+    /**
+     * Add pin to Pinterest favorites via RepinResource API
+     * @param {string} pinId - Pin ID to add
+     * @returns {Promise<boolean>} True if successful
+     */
+    async function addPinToFavorites(pinId) {
+        const data = {
+            options: {
+                carousel_slot_index: 0,
+                description: " ",
+                is_buyable_pin: false,
+                is_promoted: false,
+                is_removable: false,
+                link: null,
+                pin_id: pinId,
+                title: "",
+                aux_data: {
+                    board_picker_suggested_boards: "[]"
+                }
+            },
+            context: {}
+        };
+
+        const body = `source_url=${encodeURIComponent(`/pin/${pinId}/`)}&data=${encodeURIComponent(JSON.stringify(data))}`;
+        const csrfToken = getCSRFToken();
+        const traceId = generateTraceId();
+        
+        // Use same domain as current page to avoid CORS issues
+        const currentDomain = window.location.origin;
+
+        try {
+            const response = await fetch(`${currentDomain}/resource/RepinResource/create/`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json, text/javascript, */*, q=0.01',
+                    'Accept-Language': 'ru',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': csrfToken,
+                    'X-App-Version': '572b848',
+                    'X-Pinterest-AppState': 'active',
+                    'X-Pinterest-Source-Url': `/pin/${pinId}/`,
+                    'X-Pinterest-PWS-Handler': 'www/pin/[id].js',
+                    'X-B3-TraceId': traceId,
+                    'X-B3-SpanId': generateTraceId(),
+                    'X-B3-ParentSpanId': traceId,
+                    'X-B3-Flags': '0'
+                },
+                body: body,
+                credentials: 'include',
+                mode: 'same-origin',
+                referrer: `${currentDomain}/`,
+                referrerPolicy: 'strict-origin-when-cross-origin'
+            });
+
+            if (!response.ok) {
+                return false;
+            }
+
+            const result = await response.json();
+            return result?.resource_response?.status === 'success';
+        } catch (error) {
+            console.error(`Pinterest Archive: Failed to add pin ${pinId}:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Sync pins to Pinterest favorites
+     * @param {string[]} pinIds - Array of pin IDs to sync
+     * @returns {Promise<{success: boolean, added: number, failed: number, total: number}>}
+     */
+    async function syncPinsToPinterest(pinIds) {
+        let added = 0;
+        let failed = 0;
+
+        for (const pinId of pinIds) {
+            const success = await addPinToFavorites(pinId);
+            if (success) {
+                added++;
+                console.log(`Pinterest Archive: Pin ${pinId} added to favorites`);
+            } else {
+                failed++;
+                console.log(`Pinterest Archive: Pin ${pinId} failed`);
+            }
+
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+        return {
+            success: true,
+            added: added,
+            failed: failed,
+            total: pinIds.length
+        };
+    }
+
 
 })();

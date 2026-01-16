@@ -7,6 +7,7 @@ A self-hosted solution for archiving Pinterest pins with original quality images
 - **Web Interface**: Browse your archived pins with masonry layout, infinite scroll, and fullscreen carousel
 - **Chrome Extension**: Save pins directly from Pinterest with one click
 - **Favorites Import**: Browse your Pinterest favorites and save pins with one click via archive status icons
+- **Pinterest Sync**: Restore archived pins back to your Pinterest profile with one click
 - **Sorting**: View pins by newest, oldest, top rated, or random order
 - **Rating System**: Tracks duplicate save attempts - pins saved multiple times get higher rating
 - **Deleted Pins Detection**: Check which pins were removed from Pinterest and filter them
@@ -107,11 +108,23 @@ python src/updateDelete.py
 
 The script uses headless Chromium to visit each pin URL and marks deleted ones in the database. Deleted pins can then be viewed using the "Deleted" filter button in the web interface.
 
+### Syncing Pins to Pinterest
+
+Restore your archived pins back to your Pinterest profile (Quick Saves board):
+
+1. Open any Pinterest page in your browser
+2. A floating "🔄 Sync to Pinterest" button appears in the bottom-right corner
+3. Click the button to start syncing all non-deleted pins from your archive
+4. Progress and results are shown above the button
+
+**Note**: You must be logged into Pinterest for the sync to work. The extension uses your browser session cookies automatically.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/pins` | Get paginated pins list (params: `offset`, `limit`, `sort`, `deleted`) |
+| GET | `/api/pins/sync` | Get all non-deleted pin IDs for syncing to Pinterest |
 | POST | `/api/pins` | Add new pin (body: `pin_id`, `original_url`) |
 | POST | `/api/pins/check` | Check if pins exist in archive (body: `pin_ids[]`) |
 | DELETE | `/api/pins/{pin_id}` | Delete pin (param: `delete_file`) |
@@ -135,8 +148,9 @@ PinSaver/
 │       └── sw.js          # Service worker
 ├── extension/
 │   ├── manifest.json      # Chrome extension manifest
-│   ├── content.js         # Content script for Pinterest (pin pages + favorites)
-│   ├── styles.css         # Notification and archive icon styles
+│   ├── content.js         # Content script for Pinterest (pin pages + favorites + sync)
+│   ├── background.js      # Background service worker for API requests
+│   ├── styles.css         # Notification, archive icon, and sync button styles
 │   ├── options.html       # Extension options page
 │   └── options.js         # Options logic
 ├── originals/             # Archived images storage
