@@ -119,6 +119,21 @@ Restore your archived pins back to your Pinterest profile (Quick Saves board):
 
 **Note**: You must be logged into Pinterest for the sync to work. The extension uses your browser session cookies automatically.
 
+### Backing up originals and database
+
+Create an incremental backup zip in `backups/`:
+
+```bash
+python src/backup.py
+```
+
+The backup contains:
+
+- **Database**: `pinterest_archive.db` (always included)
+- **Original images**: only files in `originals/` that are newer than the last backup timestamp
+
+The last backup time is stored in `backups/backup_state.json`.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -138,6 +153,7 @@ PinSaver/
 │   ├── server.py          # FastAPI server
 │   ├── models.py          # Database models
 │   ├── updateDelete.py    # Script to check for deleted pins on Pinterest
+│   ├── backup.py          # Script to create incremental backups into backups/
 │   ├── migrate_duplicates.py  # Migration script for consolidating duplicates
 │   ├── requirements.txt   # Python dependencies
 │   └── static/
@@ -154,7 +170,7 @@ PinSaver/
 │   ├── options.html       # Extension options page
 │   └── options.js         # Options logic
 ├── originals/             # Archived images storage
-├── pins.db                # SQLite database
+├── pinterest_archive.db   # SQLite database
 ├── .env                   # Environment configuration (create from .env.example)
 ├── .env.example           # Example environment file
 └── README.md
