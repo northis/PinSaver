@@ -418,6 +418,12 @@ def favicon():
     return FileResponse(STATIC_PATH / "favicon.ico", media_type="image/x-icon")
 
 
+@app.get("/health")
+def health():
+    """Health check endpoint used by the browser extension and uptime checks."""
+    return {"status": "ok"}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     """Serve the main HTML page."""

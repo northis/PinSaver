@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pinterest Archive Saver",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Save Pinterest pins to your local archive",
   "permissions": [
     "storage"

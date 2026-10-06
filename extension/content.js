@@ -10,14 +10,24 @@
     const DEFAULT_SERVER_URL = 'http://localhost:8000';
     let serverUrl = DEFAULT_SERVER_URL;
     let archivedPinIds = new Set();
-    let pendingPins = new Map(); // pin_id -> file_id
+    let pendingPins = new Map(); // pin_id -> file_id (best known), awaiting check
+    let pinFileIds = new Map(); // pin_id -> best known file_id
+    let checkedPins = new Map(); // pin_id -> file_id used in the last successful check
+    let inFlightPins = new Set(); // pin ids currently being checked
+    let iconPinIds = new Set(); // pin ids that already have an icon in the DOM
     let checkDebounceTimer = null;
+    let retryTimer = null;
+    let retryDelay = 1000;
 
-    // Load server URL from storage
-    chrome.storage.sync.get(['serverUrl'], (result) => {
-        if (result.serverUrl) {
-            serverUrl = result.serverUrl;
-        }
+    // Load server URL from storage. All requests await this promise so they
+    // never race with the default URL while the configured one is loading.
+    const serverUrlReady = new Promise((resolve) => {
+        chrome.storage.sync.get(['serverUrl'], (result) => {
+            if (result.serverUrl) {
+                serverUrl = result.serverUrl;
+            }
+            resolve(serverUrl);
+        });
     });
 
     /**
@@ -366,20 +376,55 @@
     async function checkArchivedPins(pinsMap) {
         if (pinsMap.size === 0) return;
         
-        const pins = Array.from(pinsMap.entries()).map(([pin_id, file_id]) => ({ pin_id, file_id }));
+        const pins = Array.from(pinsMap.entries()).map(([pin_id, file_id]) => ({ pin_id, file_id: file_id || null }));
         
         try {
+            await serverUrlReady;
             const data = await apiRequest(`${serverUrl}/api/pins/check`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pins })
             });
             
-            data.existing.forEach(id => archivedPinIds.add(id));
+            const existing = Array.isArray(data && data.existing) ? data.existing : [];
+            existing.forEach(id => archivedPinIds.add(id));
+            
+            // Remember what was checked and with which file_id, so a pin is only
+            // re-checked when a better file_id becomes known for it.
+            pinsMap.forEach((fileId, pinId) => checkedPins.set(pinId, fileId || null));
+            
+            retryDelay = 1000;
             updateArchiveIcons();
         } catch (error) {
-            console.error('Pinterest Archive: Failed to check pins', error);
+            console.error('Pinterest Archive: Failed to check pins, will retry', error);
+            
+            // Re-queue the failed pins instead of leaving them marked as
+            // "not archived" forever, keeping the best known file_id.
+            pinsMap.forEach((fileId, pinId) => {
+                if (!archivedPinIds.has(pinId)) {
+                    pendingPins.set(pinId, pinFileIds.get(pinId) || fileId || null);
+                }
+            });
+            scheduleRetry();
+        } finally {
+            pinsMap.forEach((_fileId, pinId) => inFlightPins.delete(pinId));
         }
+    }
+
+    /**
+     * Queue a pin for an existence check unless it is already resolved
+     * @param {string} pinId - Pin ID
+     */
+    function queuePinForCheck(pinId) {
+        if (archivedPinIds.has(pinId) || inFlightPins.has(pinId)) return;
+        
+        const knownFileId = pinFileIds.get(pinId) || null;
+        
+        // Already checked and there is nothing new to look up
+        if (checkedPins.has(pinId) && checkedPins.get(pinId) === knownFileId) return;
+        
+        pendingPins.set(pinId, knownFileId);
+        scheduleArchiveCheck();
     }
 
     /**
@@ -390,12 +435,33 @@
             clearTimeout(checkDebounceTimer);
         }
         checkDebounceTimer = setTimeout(() => {
-            const pinsToCheck = new Map(pendingPins);
-            pendingPins.clear();
-            if (pinsToCheck.size > 0) {
-                checkArchivedPins(pinsToCheck);
-            }
+            checkDebounceTimer = null;
+            flushPendingChecks();
         }, 500);
+    }
+
+    /**
+     * Retry a failed check with exponential backoff
+     */
+    function scheduleRetry() {
+        if (retryTimer) return;
+        retryTimer = setTimeout(() => {
+            retryTimer = null;
+            flushPendingChecks();
+            retryDelay = Math.min(retryDelay * 2, 15000);
+        }, retryDelay);
+    }
+
+    /**
+     * Send all queued pins to the server in one batch
+     */
+    function flushPendingChecks() {
+        if (pendingPins.size === 0) return;
+        
+        const pinsToCheck = new Map(pendingPins);
+        pendingPins.clear();
+        pinsToCheck.forEach((_fileId, pinId) => inFlightPins.add(pinId));
+        checkArchivedPins(pinsToCheck);
     }
 
     /**
@@ -458,6 +524,10 @@
             });
             
             archivedPinIds.add(pinId);
+            const fileInfo = extractFileId(originalUrl);
+            if (fileInfo) {
+                pinFileIds.set(pinId, fileInfo.fileId);
+            }
             
             // Update icon to archived state
             icon.innerHTML = '✓';
@@ -465,6 +535,7 @@
             icon.classList.add('pa-archived');
             icon.title = 'In archive';
             icon.removeEventListener('click', handleArchiveIconClick);
+            updateArchiveIcons();
             
             if (result.status === 'exists') {
                 showNotification(`Pin ${pinId} already in archive`, 'exists');
@@ -481,19 +552,56 @@
     }
 
     /**
+     * Check whether an icon for the given pin already exists in the DOM
+     * @param {string} pinId - Pin ID
+     * @param {Element|null} card - Pin card element to search in first
+     * @returns {boolean} True if the icon already exists
+     */
+    function hasArchiveIcon(pinId, card) {
+        if (card && card.querySelector(`.pa-archive-icon[data-pin-id="${pinId}"]`)) {
+            return true;
+        }
+        if (iconPinIds.has(pinId)) {
+            const existing = document.querySelector(`.pa-archive-icon[data-pin-id="${pinId}"]`);
+            if (existing) {
+                return true;
+            }
+            iconPinIds.delete(pinId);
+        }
+        return false;
+    }
+
+    /**
      * Add archive icons to pin elements
      */
     function addArchiveIcons() {
         const pinElements = findPinElements();
         
         pinElements.forEach(element => {
-            // Skip if already processed
-            if (element.dataset.paProcessed) return;
-            
             const pinId = getPinIdFromElement(element);
             if (!pinId) return;
             
+            // Remember the best known file_id for this pin (never overwrite with null)
+            const fileId = getFileIdFromPinElement(element);
+            if (fileId) {
+                pinFileIds.set(pinId, fileId);
+            }
+            
+            // Already processed: just make sure the pin is queued for a check
+            if (element.dataset.paProcessed) {
+                queuePinForCheck(pinId);
+                return;
+            }
+            
             element.dataset.paProcessed = 'true';
+            
+            // A pin card contains several links to the same pin, so skip
+            // elements that already have an icon to avoid duplicate icons.
+            const card = element.closest('[data-test-id="pin"], [data-test-id="pinWrapper"]');
+            if (hasArchiveIcon(pinId, card)) {
+                queuePinForCheck(pinId);
+                return;
+            }
             
             // Find the container to add icon to
             let container = element;
@@ -506,24 +614,15 @@
                 container.style.position = 'relative';
             }
             
-            // Extract file_id from image
-            const fileId = getFileIdFromPinElement(element);
-            
-            // Add to pending check if not already known
-            if (!archivedPinIds.has(pinId)) {
-                pendingPins.set(pinId, fileId);
-            }
-            
             // Create and add icon
             const isArchived = archivedPinIds.has(pinId);
             const icon = createArchiveIcon(pinId, isArchived);
             container.appendChild(icon);
+            iconPinIds.add(pinId);
+            
+            // Queue a check if the pin state is not known yet
+            queuePinForCheck(pinId);
         });
-        
-        // Schedule check for new pins
-        if (pendingPins.size > 0) {
-            scheduleArchiveCheck();
-        }
     }
 
     /**
@@ -668,7 +767,10 @@
     /**
      * Initialize the extension
      */
-    function init() {
+    async function init() {
+        // Wait for the configured server URL so the first checks do not hit the default one
+        await serverUrlReady;
+        
         attachToSaveButtons();
         initObserver();
         

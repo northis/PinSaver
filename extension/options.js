@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.style.color = '#e65100';
 
         try {
-            const response = await fetch(`${serverUrl}/api/pins?limit=1`);
+            const response = await fetch(`${serverUrl}/health`);
             if (!response.ok) {
                 throw new Error('Server returned error');
             }

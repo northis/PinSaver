@@ -95,8 +95,6 @@ async def update_deleted_pins():
             else:
                 print(f"[{i+1}/{len(pins)}] Pin {pin['pin_id']} - OK")
             
-            # Small delay to avoid rate limiting
-            await asyncio.sleep(0.1)
         
         await browser.close()
     

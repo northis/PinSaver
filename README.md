@@ -141,9 +141,10 @@ The last backup time is stored in `backups/backup_state.json`.
 | GET | `/api/pins` | Get paginated pins list (params: `offset`, `limit`, `sort`, `deleted`) |
 | GET | `/api/pins/sync` | Get all non-deleted pin IDs for syncing to Pinterest |
 | POST | `/api/pins` | Add new pin (body: `pin_id`, `original_url`) |
-| POST | `/api/pins/check` | Check if pins exist in archive (body: `pin_ids[]`) |
+| POST | `/api/pins/check` | Check if pins exist in archive (body: `pins[]` of `pin_id`, `file_id`) |
 | DELETE | `/api/pins/{pin_id}` | Delete pin (param: `delete_file`) |
 | GET | `/images/{filename}` | Serve archived image |
+| GET | `/health` | Health check used by the extension and uptime checks |
 
 ## Project Structure
 

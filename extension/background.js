@@ -20,12 +20,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * @returns {Promise<Object>} Response data
  */
 async function handleApiRequest(url, options) {
-    const response = await fetch(url, options);
+    // Guard against a hung request: without it a pin would stay in-flight forever
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`HTTP ${response.status}: ${text}`);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`HTTP ${response.status}: ${text}`);
+        }
+        
+        return await response.json();
+    } finally {
+        clearTimeout(timeoutId);
     }
-    
-    return await response.json();
 }
