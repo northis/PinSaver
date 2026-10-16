@@ -482,6 +482,45 @@ if ('serviceWorker' in navigator) {
         .catch(err => console.log('Service Worker registration failed:', err));
 }
 
+// Build badge in the header: version links to the release tag, commit to the commit
+async function loadBuildInfo() {
+    try {
+        const response = await fetch('/api/version');
+        if (!response.ok) return;
+        renderBuildInfo(await response.json());
+    } catch (error) {
+        console.log('Build info unavailable:', error);
+    }
+}
+
+function renderBuildInfo(info) {
+    const badge = document.getElementById('buildBadge');
+    const versionLink = document.getElementById('buildVersion');
+    const commitLink = document.getElementById('buildCommit');
+    const commitSep = document.getElementById('buildCommitSep');
+    if (!badge || !info || !info.version) return;
+
+    versionLink.textContent = 'v' + info.version;
+    versionLink.href = info.tag_url || `${info.repo_url}/releases/tag/v${info.version}`;
+    versionLink.title = `Release ${info.tag || 'v' + info.version}`;
+
+    if (info.commit) {
+        commitLink.textContent = info.short + (info.dirty ? '*' : '');
+        commitLink.href = info.commit_url;
+        commitLink.title = [
+            `commit ${info.short}`,
+            info.commit_date ? info.commit_date.slice(0, 10) : null,
+            info.dirty ? 'uncommitted changes' : null
+        ].filter(Boolean).join(', ');
+        commitLink.hidden = false;
+        commitSep.hidden = false;
+    }
+
+    badge.hidden = false;
+}
+
+loadBuildInfo();
+
 // Sort controls
 function changeSort(newSort) {
     // Handle "deleted" as a filter toggle, not a sort

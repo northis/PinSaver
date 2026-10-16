@@ -1,189 +1,251 @@
-# PinSaver - Pinterest Archive Solution
+# PinSaver — локальный архив пинов Pinterest
 
-A self-hosted solution for archiving Pinterest pins with original quality images.
+PinSaver — это self-hosted архив пинов Pinterest в исходном качестве: сервер на FastAPI + SQLite
+с веб-интерфейсом (мозаика, бесконечная прокрутка, полноэкранная карусель, удаление) и расширение
+Chrome, которое сохраняет пины прямо со страниц Pinterest, помечает уже сохранённое в избранном
+и умеет заливать архив обратно в профиль.
 
-## Features
+Версия и коммит сборки всегда видны: в шапке сайта и на странице настроек расширения — `vX.Y.Z`
+ведёт на тег релиза, короткий хеш — на коммит в GitHub.
 
-- **Web Interface**: Browse your archived pins with masonry layout, infinite scroll, and fullscreen carousel
-- **Chrome Extension**: Save pins directly from Pinterest with one click
-- **Favorites Import**: Browse your Pinterest favorites and save pins with one click via archive status icons
-- **Pinterest Sync**: Restore archived pins back to your Pinterest profile with one click
-- **Sorting**: View pins by newest, oldest, top rated, or random order
-- **Rating System**: Tracks duplicate save attempts - pins saved multiple times get higher rating
-- **Deleted Pins Detection**: Check which pins were removed from Pinterest and filter them
-- **Delete Management**: Remove pins from archive with optional file deletion
+## Возможности
 
-## Requirements
+- **Веб-интерфейс** — мозаика с бесконечной прокруткой, полноэкранная карусель, сортировки
+  (новые, старые, по рейтингу, случайно) и фильтр удалённых пинов.
+- **Расширение Chrome** — кнопка «Save» на странице пина сохраняет оригинал изображения в архив.
+- **Метки в избранном** — на страницах профиля каждый пин получает значок: `✓` (уже в архиве) или
+  `↓` (можно сохранить одним кликом).
+- **Синхронизация в Pinterest** — плавающая кнопка «🔄 Sync to Pinterest» заливает архив обратно
+  в профиль (Quick Saves).
+- **Рейтинг** — повторные сохранения одного и того же изображения увеличивают счётчик: видно, что
+  нравится больше.
+- **Проверка удалённых пинов** — headless Chromium проходит по ссылкам и помечает то, что Pinterest
+  больше не отдаёт.
+- **Бэкапы** — инкрементальные zip-архивы базы и новых оригиналов.
 
-- Python 3.10+
-- Chrome browser (for extension)
+## Состав
 
-## Installation
+| Путь | Что там |
+| --- | --- |
+| `src/` | сервер FastAPI и скрипты (`server.py`, `models.py`, `importer.py`, `updateDelete.py`, `backup.py`, `buildinfo.py`) |
+| `src/static/` | веб-интерфейс (vanilla JS/CSS/HTML, без сборки) и PWA-манифест |
+| `extension/` | расширение Chrome MV3 (content script, service worker, страница настроек, иконки) |
+| `tools/` | скрипты, которые запускают руками, а результат коммитят (`make_extension_icons.py`, `bump_version.py`) |
+| `originals/`, `pinterest_archive.db`, `backups/` | данные, в git не попадают |
 
-### 1. Clone the repository
+## Быстрый старт
+
+### 1. Клонировать и поставить зависимости
 
 ```bash
 git clone https://github.com/northis/PinSaver.git
 cd PinSaver
+python -m pip install -r src/requirements.txt
 ```
 
-### 2. Install Python dependencies
+Нужен Python 3.10+.
 
-```bash
-pip install -r src/requirements.txt
-```
-
-### 3. Configure environment
-
-Copy the example environment file and adjust if needed:
+### 2. Настроить окружение
 
 ```bash
 cp .env.example .env
 ```
-
-Edit `.env` to configure:
 
 ```env
 HOST=0.0.0.0
 PORT=8000
 ```
 
-### 4. Initialize the database
+### 3. Создать базу
 
 ```bash
 python src/models.py
 ```
 
-This creates `pinterest_archive.db` SQLite database and `originals/` folder for images.
+Появятся `pinterest_archive.db` и папка `originals/` для картинок.
 
-### 5. Start the server
+### 4. Запустить сервер
 
 ```bash
 python src/server.py
 ```
 
-Server runs on `http://localhost:8000` by default.
+Сайт — `http://localhost:8000`, версия и коммит — в шапке страницы.
 
-## Usage
+### 5. Поставить расширение
 
-### Web Interface
+1. Открой `chrome://extensions/`, включи «Режим разработчика».
+2. «Загрузить распакованное расширение» → папка `extension/`.
+3. Открой настройки расширения (клик по иконке в панели или «Подробнее» → «Параметры расширения»)
+   и проверь адрес сервера — по умолчанию `http://localhost:8000`.
 
-Open `http://localhost:8000` in your browser to view archived pins.
+## Расширение Chrome
 
-- **Sort controls**: Switch between Newest, Oldest, Top (by rating), and Random order
-- **Deleted filter**: Toggle the Deleted button to show only pins removed from Pinterest
-- **Rating badge**: Each pin shows a heart icon; pins saved multiple times display a counter
-- **Carousel**: Click any pin to view in fullscreen with navigation
-- **Delete**: Hover over a pin and click the X button to delete
+### Сохранение пина
 
-### Chrome Extension
+На любой странице пина появляется кнопка «Save» — она скачивает оригинал изображения в `originals/`
+и добавляет запись в базу. Повторное сохранение того же изображения не создаёт дубликат, а поднимает
+рейтинг.
 
-1. Open `chrome://extensions/` in Chrome
-2. Enable "Developer mode"
-3. Click "Load unpacked" and select the `extension/` folder
-4. Configure server URL in extension options (default: `http://localhost:8000`)
-5. On any Pinterest pin page, click the "Save" button - the pin will be archived
+### Метки в избранном
 
-### Saving from Favorites
+На странице профиля (свои или чужие сохранённые пины) каждый пин получает значок в левом верхнем углу:
 
-1. Go to your Pinterest profile or any user's saved pins page
-2. Each pin will show an archive status icon in the top-left corner:
-   - **✓ (green)**: Pin is already in your archive
-   - **↓ (gray)**: Pin is not archived - click to save
-3. Click the icon on any unarchived pin to save it to your archive
-4. The icon turns green when the pin is successfully saved
+- **✓ (зелёный)** — пин уже в архиве;
+- **↓ (серый)** — нажми, чтобы сохранить.
 
-### Checking for Deleted Pins
+### Синхронизация обратно в Pinterest
 
-Run the `updateDelete.py` script periodically to check which pins have been removed from Pinterest:
+На любой странице Pinterest в правом нижнем углу появляется кнопка «🔄 Sync to Pinterest»: она
+по очереди отправляет не удалённые пины из архива в твой профиль. Нужен активный вход в Pinterest —
+расширение использует cookies браузера.
+
+### Настройки
+
+На странице настроек — адрес сервера, кнопка проверки соединения, ссылка на архив, иконка
+расширения и бейдж сборки: версия расширения (из манифеста, ведёт на тег релиза) и короткий хеш
+коммита (приходит с сервера, ведёт на коммит в GitHub). Если сервер недоступен, вместо хеша
+показывается «server unavailable».
+
+## Веб-интерфейс
+
+- сортировки **Newest / Oldest / Top / Random** и кнопка **Deleted** — показать только то, что
+  удалено с Pinterest;
+- счётчик под шапкой — сколько пинов загружено из общего числа;
+- клик по пину открывает карусель (`←`/`→`, `Esc`), кнопка `⛶` — то же самое;
+- кнопка `✕` на карточке удаляет пин из архива, с галочкой «Also delete the image file» — вместе
+  с файлом в `originals/`.
+
+## Проверка удалённых пинов
 
 ```bash
-# Install Playwright (first time only)
-pip install playwright
-playwright install chromium
-
-# Run the check
+playwright install chromium   # один раз
 python src/updateDelete.py
 ```
 
-The script uses headless Chromium to visit each pin URL and marks deleted ones in the database. Deleted pins can then be viewed using the "Deleted" filter button in the web interface.
+Скрипт открывает каждую ссылку в headless Chromium и ставит `is_deleted` тем пинам, которых больше
+нет. Результат виден по кнопке **Deleted** в веб-интерфейсе.
 
-### Syncing Pins to Pinterest
-
-Restore your archived pins back to your Pinterest profile (Quick Saves board):
-
-1. Open any Pinterest page in your browser
-2. A floating "🔄 Sync to Pinterest" button appears in the bottom-right corner
-3. Click the button to start syncing all non-deleted pins from your archive
-4. Progress and results are shown above the button
-
-**Note**: You must be logged into Pinterest for the sync to work. The extension uses your browser session cookies automatically.
-
-### Backing up originals and database
-
-Create an incremental backup zip in `backups/`:
+## Бэкапы
 
 ```bash
 python src/backup.py
 ```
 
-The backup contains:
+В `backups/` появляется zip: база целиком плюс только те файлы из `originals/`, что новее прошлого
+бэкапа. Время последнего бэкапа — в `backups/backup_state.json`.
 
-- **Database**: `pinterest_archive.db` (always included)
-- **Original images**: only files in `originals/` that are newer than the last backup timestamp
+## Импорт из экспорта Pinterest
 
-The last backup time is stored in `backups/backup_state.json`.
+Если база потеряна, а картинки в `originals/` остались:
 
-## API Endpoints
+```bash
+python src/importer.py
+```
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/pins` | Get paginated pins list (params: `offset`, `limit`, `sort`, `deleted`) |
-| GET | `/api/pins/sync` | Get all non-deleted pin IDs for syncing to Pinterest |
-| POST | `/api/pins` | Add new pin (body: `pin_id`, `original_url`) |
-| POST | `/api/pins/check` | Check if pins exist in archive (body: `pins[]` of `pin_id`, `file_id`) |
-| DELETE | `/api/pins/{pin_id}` | Delete pin (param: `delete_file`) |
-| GET | `/images/{filename}` | Serve archived image |
-| GET | `/health` | Health check used by the extension and uptime checks |
+Скрипт разбирает HTML-файлы экспорта Pinterest в корне проекта и восстанавливает записи по тем
+картинкам, что есть на диске. Схлопнуть дубликаты по `file_id` можно так:
 
-## Project Structure
+```bash
+python src/migrate_duplicates.py
+```
+
+## Версия, хеш и релизы
+
+Единственный источник версии — `__version__` в `src/buildinfo.py`; `tools/bump_version.py` переносит
+её в `extension/manifest.json`, так что руками версию больше нигде править не нужно.
+
+```bash
+python tools/bump_version.py 1.2.0    # поднять версию в обоих файлах
+python tools/bump_version.py --check  # проверить, что версии совпадают
+```
+
+- `GET /api/version` (`src/buildinfo.py`) отдаёт версию, коммит, дату коммита, признак незакоммиченных
+  правок и ссылки на тег и коммит; сайт рисует из этого бейдж в шапке, расширение — бейдж в настройках;
+- хеш у сайта и у расширения ведёт на коммит, версия — на `releases/tag/vX.Y.Z`; звёздочка у хеша
+  означает, что в рабочей копии есть незакоммиченные правки;
+- порядок релиза: `python tools/bump_version.py X.Y.Z` → коммит → `git tag -a vX.Y.Z -m "PinSaver X.Y.Z"`
+  → `git push --follow-tags origin master` → GitHub Release по этому тегу.
+
+Иконки расширения — тоже генерируемые: мастер-файл `extension/icon.svg`, из него рисуются PNG
+(Chrome не умеет SVG-иконки):
+
+```bash
+python tools/make_extension_icons.py
+```
+
+## Команды
+
+| Команда | Что делает |
+| --- | --- |
+| `python src/server.py` | сайт и API на `HOST:PORT` из `.env` |
+| `python src/models.py` | создать базу и папку `originals/` |
+| `python src/importer.py` | импорт пинов из HTML-экспорта Pinterest |
+| `python src/updateDelete.py` | пометить пины, удалённые с Pinterest |
+| `python src/backup.py` | инкрементальный бэкап в `backups/` |
+| `python src/migrate_duplicates.py` | схлопнуть дубликаты по `file_id` |
+| `python src/buildinfo.py` | напечатать версию, коммит и ссылки |
+| `python tools/bump_version.py X.Y.Z` | поднять версию в `src/` и `extension/` |
+| `python tools/make_extension_icons.py` | перерисовать PNG-иконки из `extension/icon.svg` |
+| `playwright install chromium` | поставить браузер для `updateDelete.py` |
+
+## API
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/api/pins` | страница пинов (`offset`, `limit`, `sort`, `deleted`) |
+| GET | `/api/pins/sync` | идентификаторы всех не удалённых пинов — для синхронизации |
+| POST | `/api/pins` | добавить пин (`pin_id`, `original_url`) |
+| POST | `/api/pins/check` | проверить, какие пины уже в архиве (`pins[]` из `pin_id`, `file_id`) |
+| DELETE | `/api/pins/{pin_id}` | удалить пин (`delete_file` — вместе с картинкой) |
+| GET | `/api/version` | версия, коммит и ссылки на репозиторий |
+| GET | `/images/{filename}` | отдать картинку из `originals/` |
+| GET | `/health` | проверка доступности сервера |
+| GET | `/` | главная страница |
+
+## Структура проекта
 
 ```
 PinSaver/
 ├── src/
-│   ├── server.py          # FastAPI server
-│   ├── models.py          # Database models
-│   ├── updateDelete.py    # Script to check for deleted pins on Pinterest
-│   ├── backup.py          # Script to create incremental backups into backups/
-│   ├── migrate_duplicates.py  # Migration script for consolidating duplicates
-│   ├── requirements.txt   # Python dependencies
-│   └── static/
-│       ├── index.html     # Main web interface
-│       ├── styles.css     # Styles
-│       ├── app.js         # Frontend logic
-│       ├── manifest.json  # PWA manifest
-│       └── sw.js          # Service worker
+│   ├── server.py             # FastAPI: API, отдача сайта и картинок
+│   ├── models.py             # схема SQLite и модель Pin
+│   ├── buildinfo.py          # версия и коммит (источник версии проекта)
+│   ├── parser.py             # разбор HTML-экспорта Pinterest
+│   ├── importer.py           # импорт разобранных пинов в базу
+│   ├── migrate_duplicates.py # схлопывание дубликатов по file_id
+│   ├── updateDelete.py       # проверка удалённых пинов через Playwright
+│   ├── backup.py             # инкрементальные бэкапы
+│   ├── requirements.txt      # зависимости Python
+│   └── static/               # сайт: index.html, app.js, styles.css, sw.js, PWA-иконки
 ├── extension/
-│   ├── manifest.json      # Chrome extension manifest
-│   ├── content.js         # Content script for Pinterest (pin pages + favorites + sync)
-│   ├── background.js      # Background service worker for API requests
-│   ├── styles.css         # Notification, archive icon, and sync button styles
-│   ├── options.html       # Extension options page
-│   └── options.js         # Options logic
-├── originals/             # Archived images storage
-├── pinterest_archive.db   # SQLite database
-├── .env                   # Environment configuration (create from .env.example)
-├── .env.example           # Example environment file
-└── README.md
+│   ├── manifest.json         # манифест MV3 (версия синхронизируется bump_version.py)
+│   ├── background.js         # service worker: прокси API-запросов, клик по иконке
+│   ├── content.js            # кнопка Save, метки в избранном, синхронизация
+│   ├── styles.css            # стили уведомлений, значков и кнопки синхронизации
+│   ├── options.html          # страница настроек
+│   ├── options.js            # логика настроек и бейджа версии
+│   ├── icon.svg              # мастер-иконка (Pinterest-стиль)
+│   └── icon16/32/48/128.png  # PNG-иконки, отрисованные из icon.svg
+├── tools/
+│   ├── make_extension_icons.py  # SVG → PNG-иконки расширения
+│   └── bump_version.py          # версия в src/ и extension/ + проверка синхронности
+├── originals/                # оригиналы картинок (в git не попадает)
+├── pinterest_archive.db      # база SQLite (в git не попадает)
+├── backups/                  # zip-бэкапы (в git не попадает)
+└── .env                      # настройки сервера (создать из .env.example)
 ```
 
-## Network Access
+## Данные и безопасность
 
-To access from other devices on your network:
+- Сервер не имеет авторизации и по умолчанию слушает `0.0.0.0` — держи его в доверенной сети и не
+  выставляй в интернет.
+- Из браузера к API обращается только расширение: CORS открыт исключительно для `*.pinterest.com`
+  (и только чтобы обойти Private Network Access), остальные источники получают отказ.
+- `pinterest_archive.db`, `originals/`, `backups/`, `testPages/` и `.env` перечислены в `.gitignore` —
+  в репозиторий попадает только код.
+- Перед рискованными операциями делай `python src/backup.py`.
 
-1. Find your computer's local IP address
-2. Access `http://<your-ip>:8000` from other devices
-
-## License
+## Лицензия
 
 MIT

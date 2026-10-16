@@ -1,10 +1,10 @@
 """Incremental backup script for PinSaver.
 
-Creates a zip archive in testPages/ containing:
+Creates a zip archive in backups/ containing:
 - All original images from originals/ that are newer than the last backup timestamp
 - The SQLite database file (always included)
 
-Backup state is stored in testPages/backup_state.json.
+Backup state is stored in backups/backup_state.json.
 """
 
 from __future__ import annotations

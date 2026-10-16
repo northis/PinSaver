@@ -16,7 +16,14 @@
 <body>
     <header>
         <div class="header-top">
-            <h1>📌 Pinterest Archive</h1>
+            <div class="header-title">
+                <h1>📌 Pinterest Archive</h1>
+                <div class="build-badge" id="buildBadge" hidden>
+                    <a id="buildVersion" target="_blank" rel="noopener noreferrer"></a>
+                    <span class="sep" id="buildCommitSep" hidden>·</span>
+                    <a id="buildCommit" target="_blank" rel="noopener noreferrer" hidden></a>
+                </div>
+            </div>
             <div class="sort-controls">
                 <button class="sort-btn active" data-sort="newest">Newest</button>
                 <button class="sort-btn" data-sort="oldest">Oldest</button>

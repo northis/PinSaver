@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from buildinfo import build_info
 from models import get_db_path, Pin, insert_pin, pin_exists
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -27,6 +28,10 @@ app = FastAPI(title="Pinterest Archive Viewer")
 
 STATIC_PATH = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
+
+# CSS and JS links get a ?v=<version> suffix so a new release is not served
+# from the browser cache
+VERSIONED_ASSET_RE = re.compile(r'(["\'])(/static/[^"\']+\.(?:css|js))\1')
 
 
 def is_pinterest_origin(origin: str) -> bool:
@@ -424,10 +429,25 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/version")
+def version():
+    """
+    Version, commit and repository links of the running checkout.
+
+    Shown as a badge in the site header and on the extension options page.
+    """
+    return build_info()
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
-    """Serve the main HTML page."""
-    return (STATIC_PATH / "index.html").read_text(encoding="utf-8")
+    """Serve the main HTML page with cache-busted static asset URLs."""
+    html = (STATIC_PATH / "index.html").read_text(encoding="utf-8")
+    html = VERSIONED_ASSET_RE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}?v={build_info()['version']}{match.group(1)}",
+        html
+    )
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 if __name__ == "__main__":

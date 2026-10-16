@@ -3,6 +3,21 @@
   "name": "Pinterest Archive Saver",
   "version": "1.1.0",
   "description": "Save Pinterest pins to your local archive",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    },
+    "default_title": "Pinterest Archive Saver - settings"
+  },
   "permissions": [
     "storage"
   ],

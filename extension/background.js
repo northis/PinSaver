@@ -3,6 +3,11 @@
  * Handles API requests to bypass Private Network Access restrictions.
  */
 
+// The toolbar icon has no popup, so a click opens the settings page
+chrome.action.onClicked.addListener(() => {
+    chrome.runtime.openOptionsPage();
+});
+
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'API_REQUEST') {
