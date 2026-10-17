@@ -46,9 +46,12 @@ function Write-Step([string]$Text) {
 }
 
 function Invoke-Git([string[]]$Arguments) {
-    $output = & git -C $Repo @Arguments 2>&1
+    # stderr is deliberately NOT redirected: with $ErrorActionPreference = "Stop", merging a
+    # native command's stderr turns git's progress output ("From https://...") into a
+    # terminating NativeCommandError. It goes to the console instead, and the exit code decides.
+    $output = & git -C $Repo @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "git $($Arguments -join ' ') failed: $output"
+        throw "git $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
     }
     return $output
 }
