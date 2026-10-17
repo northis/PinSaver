@@ -57,27 +57,46 @@ function Invoke-Git([string[]]$Arguments) {
 }
 
 function Get-RunningCommit {
-    # The container publishes the site on 127.0.0.1 for the extension, so the host can ask it.
+    # A plain .NET request on purpose: in Windows PowerShell 5.1 the first Invoke-RestMethod of a
+    # session warms up the Internet Explorer parser, which adds seconds to the very first poll of
+    # a loop that is supposed to notice a container coming up.
     try {
-        $info = Invoke-RestMethod -Uri $VersionUrl -TimeoutSec 5
-        return [string]$info.commit
+        $client = New-Object System.Net.WebClient
+        $client.Headers.Add("Accept", "application/json")
+        $json = $client.DownloadString($VersionUrl)
+        $client.Dispose()
+        return [string]($json | ConvertFrom-Json).commit
     } catch {
         return ""
     }
 }
 
 function Wait-ForCommit([string]$Expected, [int]$Seconds) {
+    # Prints a dot per poll: a silent loop that may legitimately run for two minutes looks exactly
+    # like a hang, and this one used to be silent.
     $deadline = (Get-Date).AddSeconds($Seconds)
+    $reported = ""
     while ((Get-Date) -lt $deadline) {
-        if ((Get-RunningCommit) -eq $Expected) {
+        $seen = Get-RunningCommit
+        if ($seen -eq $Expected) {
+            Write-Host " ok" -ForegroundColor Green
             return $true
         }
-        Start-Sleep -Seconds 3
+        if ($seen -and $seen -ne $reported) {
+            $reported = $seen
+            Write-Host ""
+            Write-Host "  container still reports $($seen.Substring(0, 7))" -ForegroundColor Yellow
+            Write-Host "  waiting" -NoNewline
+        }
+        Write-Host "." -NoNewline
+        Start-Sleep -Seconds 2
     }
+    Write-Host ""
     return $false
 }
 
-function Start-Service {
+function Start-Site {
+    # Not named Start-Service: that is a built-in cmdlet, and shadowing it is a trap.
     & docker compose --project-directory $Repo up -d --no-build $Service
     if ($LASTEXITCODE -ne 0) {
         throw "docker compose up failed"
@@ -91,7 +110,7 @@ function Restore-PreviousImage {
         Write-Host "no $PreviousImage to restore" -ForegroundColor Yellow
         return
     }
-    Start-Service
+    Start-Site
     Write-Host "previous image is running again" -ForegroundColor Yellow
 }
 
@@ -189,9 +208,10 @@ try {
 }
 
 Write-Step "Starting $Service"
-Start-Service
+Start-Site
 
-Write-Step "Waiting for /api/version to report $short"
+Write-Host ""
+Write-Host "== Waiting for /api/version to report $short" -ForegroundColor Cyan -NoNewline
 if (-not (Wait-ForCommit $target $TimeoutSeconds)) {
     Write-Host "the new image did not report $short within $TimeoutSeconds s" -ForegroundColor Red
     Restore-PreviousImage
