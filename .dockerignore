@@ -1,0 +1,37 @@
+# The archive itself is mounted from the host, never baked into the image.
+originals/
+backups/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+testPages/
+.env
+.sdd/
+.openchamber/
+
+# Host-side tooling and local artifacts: not needed inside the container.
+extension/
+tools/
+tests/
+deploy/
+src/requirements-tools.txt
+src/requirements-dev.txt
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.idea/
+.vscode/
+.gitignore
+.gitattributes
+
+# Git metadata: the builder gets only HEAD and the refs, never history or objects. The
+# image resolves its commit from them (src/buildinfo.py) when PINSAVER_COMMIT is not
+# passed - that is how a plain `docker compose up -d --build` after `git pull` stamps the
+# new commit into /api/version and the site badge.
+.git/*
+!.git/HEAD
+!.git/packed-refs
+!.git/refs/

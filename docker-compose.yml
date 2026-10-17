@@ -1,0 +1,41 @@
+# PinSaver: the site plus the SQLite archive.
+# The archive lives on the host and is bind-mounted into the container, so the image can be
+# rebuilt or removed freely. Ports, the mount point and the build metadata can be
+# overridden in .env (see .env.example).
+services:
+  pinsaver:
+    build:
+      context: .
+      args:
+        PINSAVER_COMMIT: "${PINSAVER_COMMIT:-}"
+        PINSAVER_COMMIT_DATE: "${PINSAVER_COMMIT_DATE:-}"
+        PINSAVER_VERSION: "${PINSAVER_VERSION:-}"
+        PINSAVER_CREATED: "${PINSAVER_CREATED:-}"
+    image: pinsaver:latest
+    container_name: pinsaver
+    restart: unless-stopped
+    ports:
+      # The extension talks to the archive on this machine only: its host_permissions are
+      # localhost and 127.0.0.1.
+      - "127.0.0.1:${PINSAVER_PORT:-8000}:8000"
+      # Traefik on the sitehub host reaches the site over the SoftEther VPN. Never publish
+      # this address to the internet directly: the site is closed by Cloudflare Access.
+      - "${PINSAVER_BIND_ADDR:-10.77.77.21}:${PINSAVER_PORT:-8000}:8000"
+      # Maintenance page (later release): local addresses only, so the database can be
+      # downloaded from the local network.
+      # - "${PINSAVER_ADMIN_BIND_ADDR:-10.77.77.21}:${PINSAVER_ADMIN_PORT:-8001}:8001"
+    environment:
+      # listen on all interfaces so the published ports work
+      HOST: 0.0.0.0
+      PORT: 8000
+      # inside the container the archive is always at /data (the mount below)
+      PINSAVER_DATA_DIR: /data
+      PINSAVER_REPO_URL: "${PINSAVER_REPO_URL:-}"
+    volumes:
+      # database (with its journal files), originals/ and backups/ stay on the host
+      - "${PINSAVER_HOST_DATA_DIR:-.}:/data"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
