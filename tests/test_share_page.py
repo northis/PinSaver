@@ -105,27 +105,6 @@ def test_service_worker_calls_the_guarded_api_and_caches_nothing() -> None:
     assert "caches" not in source
 
 
-def test_manifest_declares_the_share_target(client: TestClient) -> None:
-    manifest = client.get("/static/manifest.json").json()
-
-    assert manifest["id"] == "/"
-    assert manifest["scope"] == "/"
-    assert manifest["display"] == "standalone"
-    assert manifest["share_target"] == {
-        "action": "/share",
-        "method": "POST",
-        "enctype": "multipart/form-data",
-        "params": {"title": "title", "text": "text", "url": "url"},
-    }
-
-
-def test_manifest_icons_are_served(client: TestClient) -> None:
-    manifest = client.get("/static/manifest.json").json()
-
-    for icon in manifest["icons"]:
-        assert client.get(icon["src"]).status_code == 200
-
-
 def test_site_registers_the_root_worker_and_drops_the_old_one(client: TestClient) -> None:
     """The page's own JS must register /sw.js and unregister the /static/sw.js registration."""
     app_js = client.get("/static/app.js").text

@@ -1,0 +1,5 @@
+<!-- The pin from the site header (📌 in <h1>, index.html) as a tab icon: the browser draws the
+     same emoji glyph the page uses, so the icon matches the header on every platform. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <text x="50" y="51" font-size="84" text-anchor="middle" dominant-baseline="central">📌</text>
+</svg>

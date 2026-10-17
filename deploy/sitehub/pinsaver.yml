@@ -8,16 +8,17 @@
 #   pinsaver      everything, behind the Access JWT check. Cloudflare Access is the only
 #                 gate in front of the archive, so this middleware is not optional.
 #
-#   pinsaver-pwa  the manifest and the two icons only, WITHOUT the check. Android builds
-#                 the WebAPK on Google's servers, and those fetch the manifest and the
+#   pinsaver-pwa  the manifest, the icons and the favicon only, WITHOUT the check. Android
+#                 builds the WebAPK on Google's servers, and those fetch the manifest and the
 #                 icons without a session: with the check they get 401, the app cannot be
 #                 installed, and PinSaver never appears in the system share sheet.
-#                 The same two paths also need a Bypass policy in Cloudflare Access
+#                 The same paths also need a Bypass policy in Cloudflare Access
 #                 (dashboard, not this file) - both layers are independent.
 #
-# Check after pasting (both must answer 200 without a session):
-#   curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.example.com/static/manifest.json
-#   curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.example.com/static/icon-192.png
+# Check after pasting (all three must answer 200 without a session):
+#   curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.example.com/manifest.webmanifest
+#   curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.example.com/static/favicon.svg
+#   curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.example.com/static/icons/icon-192.png
 # and that the site itself does not open without a session.
 
 http:
@@ -28,7 +29,7 @@ http:
       middlewares: [cf-access-verify@file]
 
     pinsaver-pwa:
-      rule: "Host(`pinsaver.example.com`) && (Path(`/static/manifest.json`) || Path(`/static/icon-192.png`) || Path(`/static/icon-512.png`))"
+      rule: "Host(`pinsaver.example.com`) && (Path(`/manifest.webmanifest`) || Path(`/static/favicon.svg`) || PathPrefix(`/static/icons/`))"
       service: pinsaver
       priority: 100
 

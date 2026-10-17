@@ -28,6 +28,10 @@ PORT = int(os.getenv("PORT", "8000"))
 app = FastAPI(title="Pinterest Archive Viewer")
 
 STATIC_PATH = Path(__file__).parent / "static"
+#: The web app manifest, served from the root rather than from /static: Android builds the
+#: WebAPK on Google's servers and those fetch it without a session, so this one path stays
+#: public (see deploy/sitehub/pinsaver.yml and README).
+MANIFEST_PATH = STATIC_PATH / "manifest.webmanifest"
 app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
 
 # CSS and JS links get a ?v=<version> suffix so a new release is not served
@@ -447,9 +451,29 @@ def get_image(filename: str):
 
 
 @app.get("/favicon.ico")
-def favicon():
-    """Serve the favicon."""
-    return FileResponse(STATIC_PATH / "favicon.ico", media_type="image/x-icon")
+def favicon() -> RedirectResponse:
+    """
+    Send the browser's conventional /favicon.ico to the SVG icon.
+
+    Browsers ask for /favicon.ico by convention, and keep asking from their cache when the
+    page already points at /static/favicon.svg.
+    """
+    return RedirectResponse("/static/favicon.svg")
+
+
+@app.get("/manifest.webmanifest")
+def manifest() -> FileResponse:
+    """
+    Web app manifest: the site installed as an app.
+
+    An explicit route rather than a file under /static: `.webmanifest` is missing from some
+    mimetype tables, and Chrome ignores a manifest served as text/plain.
+    """
+    return FileResponse(
+        MANIFEST_PATH,
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/health")

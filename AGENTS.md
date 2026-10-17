@@ -9,9 +9,9 @@ marks already-archived pins in favorites and pushes the archive back to Pinteres
 | Path | What is there |
 | --- | --- |
 | `src/` | FastAPI server and hand-run scripts (`server.py`, `models.py`, `archive.py`, `pinterest.py`, `importer.py`, `updateDelete.py`, `backup.py`, `buildinfo.py`) |
-| `src/static/` | web UI served as-is, no build step (HTML/CSS/JS, PWA manifest, service worker) |
+| `src/static/` | web UI served as-is, no build step (HTML/CSS/JS, PWA manifest, icons, service worker) |
 | `extension/` | Chrome MV3 extension (content script, service worker, options page, icons) |
-| `tools/` | scripts run by hand whose output is committed (`make_extension_icons.py`, `bump_version.py`) |
+| `tools/` | scripts run by hand whose output is committed (`make_extension_icons.py`, `make_pwa_icons.py`, `bump_version.py`) |
 | `tests/` | offline pytest suite (`PINSAVER_DATA_DIR` points it at a temporary directory) |
 | `Dockerfile`, `docker-compose.yml` | the image (runtime only) and how it runs: the archive is bind-mounted |
 | `deploy/` | host-side update script (`windows/update.ps1`) and the sitehub fragment (`sitehub/pinsaver.yml`) |
@@ -31,6 +31,7 @@ python src/migrate_duplicates.py                # merge duplicates by file_id
 python tools/bump_version.py X.Y.Z              # bump the version everywhere
 python tools/bump_version.py --check            # verify every copy of the version matches
 python tools/make_extension_icons.py            # regenerate extension PNGs from extension/icon.svg
+python tools/make_pwa_icons.py                  # regenerate the PWA icons from the header emoji
 python -m pytest -q                             # the offline test suite
 docker compose up -d --build                    # build and run the site in a container
 docker compose ps                               # healthy means the healthcheck passed
@@ -60,14 +61,19 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
   the commit from the server, so the badge is never stale.
 - The extension icons are generated from `extension/icon.svg` by `tools/make_extension_icons.py`
   (Chrome does not accept SVG icons); never edit the PNGs by hand.
+- The PWA icons in `src/static/icons/` and `src/static/favicon.svg` are the header emoji (📌),
+  rendered by `tools/make_pwa_icons.py`; never edit those PNGs by hand either. The manifest is an
+  explicit route at the root (`/manifest.webmanifest`, served as `application/manifest+json`),
+  because `.webmanifest` is missing from some mimetype tables, and `/favicon.ico` redirects to
+  `/static/favicon.svg`.
 
 ## Deployment
 
 - The site runs in a container **on the owner's PC**, next to the archive; sitehub (Traefik on the
   Ubuntu host) reaches it over the SoftEther VPN at `${PINSAVER_BIND_ADDR}` (default `10.77.77.21`),
   and Cloudflare Access is the only gate in front of it. Nothing inside the app authenticates.
-- **Exactly three paths are public** — `/static/manifest.json`, `/static/icon-192.png`,
-  `/static/icon-512.png` — in two independent layers: a Bypass policy in Cloudflare Access and the
+- **Exactly three paths are public** — `/manifest.webmanifest`, `/static/favicon.svg` and
+  `/static/icons/*` — in two independent layers: a Bypass policy in Cloudflare Access and the
   `pinsaver-pwa` router in sitehub (`deploy/sitehub/pinsaver.yml`). Google's WebAPK builder fetches
   them without a session; without them Android cannot install the app. Everything else, including
   `/api/*`, `/images/*` and `/share`, stays behind the JWT check.

@@ -28,9 +28,9 @@ Chrome, которое сохраняет пины прямо со страни�
 | Путь | Что там |
 | --- | --- |
 | `src/` | сервер FastAPI и скрипты (`server.py`, `models.py`, `importer.py`, `updateDelete.py`, `backup.py`, `buildinfo.py`) |
-| `src/static/` | веб-интерфейс (vanilla JS/CSS/HTML, без сборки) и PWA-манифест |
+| `src/static/` | веб-интерфейс (vanilla JS/CSS/HTML, без сборки), PWA-манифест и иконки |
 | `extension/` | расширение Chrome MV3 (content script, service worker, страница настроек, иконки) |
-| `tools/` | скрипты, которые запускают руками, а результат коммитят (`make_extension_icons.py`, `bump_version.py`) |
+| `tools/` | скрипты, которые запускают руками, а результат коммитят (`make_extension_icons.py`, `make_pwa_icons.py`, `bump_version.py`) |
 | `Dockerfile`, `docker-compose.yml` | сборка образа и запуск: в образ идёт только рантайм, архив монтируется с хоста |
 | `deploy/` | хостовые скрипты и конфиги: `windows/update.ps1`, `sitehub/pinsaver.yml` |
 | `tests/` | офлайн-тесты (pytest): архив не трогают, сети не требуют |
@@ -125,17 +125,22 @@ Ubuntu-сервере с wildcard-сертификатом, который хо�
    (`10.77.77.21`).
 2. В sitehub в `traefik/dynamic/vpn-sites.yml` вставляется фрагмент `deploy/sitehub/pinsaver.yml`
    (заменить домен и адрес VPN). Он добавляет **два** роутера: основной — за проверкой
-   `cf-access-verify@file`, и публичный для трёх путей: `/static/manifest.json`,
-   `/static/icon-192.png`, `/static/icon-512.png`. Без публичного роутера Google не соберёт WebAPK,
+   `cf-access-verify@file`, и публичный для трёх путей: `/manifest.webmanifest`,
+   `/static/favicon.svg` и `/static/icons/*`. Без публичного роутера Google не соберёт WebAPK,
    и PinSaver не появится в системном «Поделиться».
 3. В Cloudflare Access этим же трём путям нужна политика **Bypass** (Include = Everyone): политика на
    крае и проверка на входе sitehub — два независимых слоя, нужны оба.
 4. Проверка:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.<домен>/static/manifest.json   # 200 без сессии
-curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.<домен>/static/icon-192.png    # 200 без сессии
+curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.<домен>/manifest.webmanifest          # 200 без сессии
+curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.<домен>/static/favicon.svg            # 200 без сессии
+curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.<домен>/static/icons/icon-192.png     # 200 без сессии
 ```
+
+Установленное ранее приложение подтянет новый манифест при следующем запуске; если иконка на домашнем
+экране осталась прежней, удалите приложение и поставьте заново — прежние пути (`/static/manifest.json`
+и `/static/icon-*.png`) в 2.2.0 убраны, а новые должны быть открыты в обоих слоях.
 
 Сайт без сессии Access открываться не должен: внутри приложения авторизации нет, Access — единственный
 вход снаружи. Порт `8000` в интернет не публикуется (в `ports` только `127.0.0.1` и VPN-адрес), а
@@ -279,6 +284,18 @@ python tools/bump_version.py --check  # проверить, что версии 
 python tools/make_extension_icons.py
 ```
 
+Иконки PWA (`src/static/icons/*.png`) и `src/static/favicon.svg` рисуются из эмодзи шапки сайта
+(📌) — так иконка на домашнем экране совпадает с шапкой, как в duosave:
+
+```bash
+python tools/make_pwa_icons.py
+```
+
+Манифест лежит в корне (`/manifest.webmanifest`), потому что Google при сборке WebAPK забирает его
+и иконки **без сессии**: эти три пути открыты в sitehub и Cloudflare Access (см. «Публикация в
+интернете»). Сам манифест отдаёт отдельный маршрут с типом `application/manifest+json`, а
+`/favicon.ico` перенаправляет на `/static/favicon.svg`.
+
 ## Команды
 
 | Команда | Что делает |
@@ -292,6 +309,7 @@ python tools/make_extension_icons.py
 | `python src/buildinfo.py` | напечатать версию, коммит и ссылки |
 | `python tools/bump_version.py X.Y.Z` | поднять версию в `src/` и `extension/` |
 | `python tools/make_extension_icons.py` | перерисовать PNG-иконки из `extension/icon.svg` |
+| `python tools/make_pwa_icons.py` | перерисовать иконки PWA из эмодзи шапки (📌) |
 | `python tools/resolve_pin.py <ссылка>` | проверить резолвер на живой ссылке (`--save-fixture` обновляет фикстуру тестов) |
 | `playwright install chromium` | поставить браузер для `updateDelete.py` |
 | `python -m pytest -q` | офлайн-тесты (архив и сеть не трогают) |
@@ -312,6 +330,8 @@ python tools/make_extension_icons.py
 | GET | `/share` | страница результата шаринга: собирается только из параметров URL |
 | POST | `/share` | заглушка share target: тело не читается, `303` на `?error=sw` |
 | GET | `/sw.js` | service worker из корня: перехват `POST /share`, кеша нет |
+| GET | `/manifest.webmanifest` | PWA-манифест из корня (`application/manifest+json`, публичный путь) |
+| GET | `/favicon.ico` | редирект на `/static/favicon.svg` |
 | GET | `/api/version` | версия, коммит и ссылки на репозиторий |
 | GET | `/images/{filename}` | отдать картинку из `originals/` |
 | GET | `/health` | проверка доступности сервера |
@@ -335,7 +355,7 @@ PinSaver/
 │   ├── requirements.txt      # рантайм: его же ставит контейнер
 │   ├── requirements-tools.txt # хостовые скрипты: Playwright, BeautifulSoup, Pillow
 │   ├── requirements-dev.txt  # pytest
-│   └── static/               # сайт: index.html, app.js, styles.css, sw.js, share.html, PWA-иконки
+│   └── static/               # сайт: index.html, app.js, styles.css, sw.js, share.html, manifest.webmanifest, icons/
 ├── Dockerfile                # образ: только рантайм, архив монтируется
 ├── docker-compose.yml        # запуск, порты, монтирование /data
 ├── deploy/
@@ -353,6 +373,7 @@ PinSaver/
 │   └── icon16/32/48/128.png  # PNG-иконки, отрисованные из icon.svg
 ├── tools/
 │   ├── make_extension_icons.py  # SVG → PNG-иконки расширения
+│   ├── make_pwa_icons.py        # эмодзи шапки → PNG-иконки PWA
 │   ├── resolve_pin.py           # резолвер вручную + обновление фикстуры тестов
 │   └── bump_version.py          # версия в src/ и extension/ + проверка синхронности
 ├── originals/                # оригиналы картинок (в git не попадает)
