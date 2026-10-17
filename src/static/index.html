@@ -24,14 +24,22 @@
                     <a id="buildCommit" target="_blank" rel="noopener noreferrer" hidden></a>
                 </div>
             </div>
-            <div class="sort-controls">
-                <button class="sort-btn active" data-sort="newest">Newest</button>
-                <button class="sort-btn" data-sort="oldest">Oldest</button>
-                <button class="sort-btn" data-sort="top">Top</button>
-                <button class="sort-btn" data-sort="random">Random</button>
-                <button class="sort-btn deleted-btn" data-sort="deleted">Deleted</button>
+            <div class="header-tools">
+                <form class="save-link" id="saveLinkForm" autocomplete="off">
+                    <input type="text" id="saveLinkInput" placeholder="Paste a pin link"
+                           spellcheck="false" aria-label="Pin link">
+                    <button type="submit" id="saveLinkButton">Save link</button>
+                </form>
+                <div class="sort-controls">
+                    <button class="sort-btn active" data-sort="newest">Newest</button>
+                    <button class="sort-btn" data-sort="oldest">Oldest</button>
+                    <button class="sort-btn" data-sort="top">Top</button>
+                    <button class="sort-btn" data-sort="random">Random</button>
+                    <button class="sort-btn deleted-btn" data-sort="deleted">Deleted</button>
+                </div>
             </div>
         </div>
+        <div class="save-link-status" id="saveLinkStatus" hidden></div>
         <div class="stats" id="stats">Loading...</div>
     </header>
 

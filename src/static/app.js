@@ -523,6 +523,19 @@ function renderBuildInfo(info) {
 loadBuildInfo();
 
 // Sort controls
+function resetGallery() {
+    allPins = [];
+    offset = 0;
+    hasMore = true;
+    renderedCount = 0;
+    columns = 0;
+    columnHeights = [];
+    imageHeights.clear();
+    masonry.innerHTML = '';
+
+    loadPins();
+}
+
 function changeSort(newSort) {
     // Handle "deleted" as a filter toggle, not a sort
     if (newSort === 'deleted') {
@@ -540,17 +553,7 @@ function changeSort(newSort) {
         document.querySelector('.deleted-btn').classList.remove('active');
     }
     
-    // Reset and reload
-    allPins = [];
-    offset = 0;
-    hasMore = true;
-    renderedCount = 0;
-    columns = 0;
-    columnHeights = [];
-    imageHeights.clear();
-    masonry.innerHTML = '';
-    
-    loadPins();
+    resetGallery();
 }
 
 document.querySelectorAll('.sort-btn').forEach(btn => {
@@ -558,3 +561,69 @@ document.querySelectorAll('.sort-btn').forEach(btn => {
         changeSort(btn.dataset.sort);
     });
 });
+
+// Save a pin by pasting its link: the same resolver the phone's share sheet uses
+const SAVE_LINK_MESSAGES = {
+    not_a_pin_link: 'Not a pin link — paste something like https://www.pinterest.com/pin/<id>/.',
+    pin_not_found: 'Pinterest does not serve this pin anymore.',
+    pinterest_unavailable: 'Pinterest is not answering — try again in a minute.',
+    image_unavailable: 'Pinterest did not return an image for this pin.'
+};
+
+function setSaveLinkStatus(text, isError) {
+    const status = document.getElementById('saveLinkStatus');
+    if (!status) return;
+    status.textContent = text || '';
+    status.hidden = !text;
+    status.classList.toggle('error', Boolean(isError));
+}
+
+async function saveLinkByUrl(event) {
+    event.preventDefault();
+
+    const input = document.getElementById('saveLinkInput');
+    const button = document.getElementById('saveLinkButton');
+    const url = input.value.trim();
+    if (!url) return;
+
+    button.disabled = true;
+    setSaveLinkStatus('Saving…', false);
+
+    try {
+        const response = await fetch('/api/pins/resolve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-PinSaver-Request': '1' },
+            body: JSON.stringify({ url })
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            setSaveLinkStatus(SAVE_LINK_MESSAGES[data.detail] || 'Could not save this link.', true);
+            return;
+        }
+
+        const size = data.size && data.size !== 'local' ? ` (${data.size})` : '';
+        if (data.status === 'exists') {
+            setSaveLinkStatus(`Already in the archive: pin ${data.pin_id}`, false);
+        } else if (data.status === 'restored') {
+            setSaveLinkStatus(`Restored pin ${data.pin_id} — it was marked deleted`, false);
+        } else {
+            setSaveLinkStatus(`Saved pin ${data.pin_id}${size}`, false);
+            input.value = '';
+        }
+
+        // A new pin belongs at the top of "Newest"; other orders keep what the reader chose.
+        if (currentSort === 'newest' && !showDeleted) {
+            resetGallery();
+        }
+    } catch (error) {
+        setSaveLinkStatus('Could not reach the server.', true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+const saveLinkForm = document.getElementById('saveLinkForm');
+if (saveLinkForm) {
+    saveLinkForm.addEventListener('submit', saveLinkByUrl);
+}

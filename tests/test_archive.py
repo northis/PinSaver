@@ -27,8 +27,7 @@ PAYLOAD = b"\xff\xd8\xff\xe0not-a-real-jpeg"
 
 @pytest.fixture()
 def conn(data_dir: Path) -> sqlite3.Connection:
-    """Connection to the temporary database, schema created."""
-    models.init_db()
+    """Connection to the temporary database (the schema is created by `data_dir`)."""
     connection = sqlite3.connect(models.get_db_path())
     connection.row_factory = sqlite3.Row
     yield connection

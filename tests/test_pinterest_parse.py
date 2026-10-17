@@ -67,9 +67,19 @@ def test_preload_link_is_used_when_og_image_is_missing() -> None:
     assert pin.file_id == "b" * 32
 
 
-def test_page_without_images_is_reported(page: str) -> None:
+def test_page_without_any_metadata_is_a_missing_pin() -> None:
+    """A pin id Pinterest never had gets a 200 with none of the pin's own metadata."""
     with pytest.raises(pinterest.PinLookupError) as error:
         pinterest.parse_pin_page(PIN_ID, "<html><body>nothing here</body></html>")
+
+    assert error.value.reason == "pin_not_found"
+
+
+def test_real_pin_without_an_image_is_reported() -> None:
+    html = '<meta property="og:url" content="https://www.pinterest.com/pin/1/"/>'
+
+    with pytest.raises(pinterest.PinLookupError) as error:
+        pinterest.parse_pin_page(PIN_ID, html)
 
     assert error.value.reason == "image_unavailable"
 

@@ -255,10 +255,14 @@ def parse_pin_page(pin_id: str, html: str) -> ResolvedPin:
     Pull the image out of a pin page. Pure function: no network, no database.
 
     Raises:
-        PinLookupError: reason `image_unavailable` when the page has no usable image.
+        PinLookupError: `pin_not_found` when Pinterest answered with its generic page (a pin
+            id it never had gets a 200, not a 404, and no pin metadata at all), or
+            `image_unavailable` when a real pin has no usable image.
     """
     sized = meta_content(html, "og:image") or link_href(html, "pin-image-preload")
     if not sized:
+        if not meta_content(html, "og:url"):
+            raise PinLookupError("pin_not_found", f"pin {pin_id} has no page on Pinterest")
         raise PinLookupError("image_unavailable", "no og:image on the pin page")
 
     parts = image_parts(sized)

@@ -19,14 +19,16 @@ if str(SRC) not in sys.path:
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import models  # noqa: E402
 import server  # noqa: E402
 
 
 @pytest.fixture()
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Temporary archive directory: the database and originals/ live here."""
+    """Temporary archive directory: an empty database and originals/ live here."""
     monkeypatch.setenv("PINSAVER_DATA_DIR", str(tmp_path))
     (tmp_path / "originals").mkdir()
+    models.init_db()
     return tmp_path
 
 

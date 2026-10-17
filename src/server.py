@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from archive import AddPinError, add_pin_from_url
 from buildinfo import build_info
 from models import get_db_path, get_originals_path
+from pinterest import PinLookupError, extract_pin_id, resolve_pin
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -271,6 +272,59 @@ def add_pin(request: AddPinRequest, _: None = Depends(require_csrf)):
             "file_extension": result.file_extension
         }
     return response
+
+
+class ResolvePinRequest(BaseModel):
+    """Request model for saving a pin by its link."""
+    url: str
+
+
+#: HTTP status for every way a link can fail to resolve.
+LOOKUP_STATUS = {
+    "not_a_pin_link": 400,
+    "pin_not_found": 404,
+    "pinterest_unavailable": 502,
+    "image_unavailable": 502,
+}
+
+
+@app.post("/api/pins/resolve")
+def resolve_pin_by_link(request: ResolvePinRequest, _: None = Depends(require_csrf)):
+    """
+    Save a pin by its Pinterest link.
+
+    Does exactly what the phone's share sheet does: turn the link into a pin, download the
+    image and add it through the shared code path.
+
+    Args:
+        request: ResolvePinRequest with the link the user pasted or shared.
+
+    Returns:
+        Dictionary with status, pin_id, file_id, size and message.
+    """
+    try:
+        pin_id = extract_pin_id(request.url)
+        pin = resolve_pin(pin_id)
+    except PinLookupError as error:
+        print(f"resolve: {error.reason} ({error.detail}) for {request.url[:200]!r}", flush=True)
+        raise HTTPException(status_code=LOOKUP_STATUS[error.reason], detail=error.reason)
+
+    conn = get_db_connection()
+    try:
+        result = add_pin_from_url(conn, pin.pin_id, pin.image_url)
+    except AddPinError as error:
+        print(f"resolve: {error.reason} ({error.detail}) for pin {pin.pin_id}", flush=True)
+        raise HTTPException(status_code=502, detail=error.reason)
+    finally:
+        conn.close()
+
+    return {
+        "status": result.status,
+        "pin_id": result.pin_id,
+        "file_id": result.file_id,
+        "size": result.size,
+        "message": result.message,
+    }
 
 
 class PinCheckItem(BaseModel):

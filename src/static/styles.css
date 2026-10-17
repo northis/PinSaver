@@ -73,6 +73,72 @@ header h1 {
     gap: 8px;
 }
 
+.header-tools {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.save-link {
+    display: flex;
+    gap: 6px;
+}
+
+.save-link input {
+    width: 240px;
+    max-width: 100%;
+    padding: 7px 14px;
+    border-radius: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.save-link input::placeholder {
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.save-link input:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.save-link button {
+    padding: 7px 16px;
+    border-radius: 20px;
+    border: 2px solid #ffffff;
+    background: #ffffff;
+    color: #e60023;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.save-link button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.85);
+}
+
+.save-link button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.save-link-status {
+    margin-top: 6px;
+    font-size: 13px;
+}
+
+.save-link-status.error {
+    color: #ffd9d9;
+}
+
 .sort-btn {
     padding: 6px 14px;
     border-radius: 20px;
