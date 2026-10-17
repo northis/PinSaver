@@ -7,6 +7,8 @@
     the work.
 
       1. git fetch --prune --tags, fast-forward the branch, require HEAD == origin/<branch>
+         (the fetch is retried: a concurrent git process - the push you just ran, an
+         editor's git integration - can hold a ref lock for a second and fail it)
       2. read __version__ from src/buildinfo.py at the target commit, warn if it is untagged
       3. exit early when the running container already reports that commit
       4. tag the current image as pinsaver:previous
@@ -66,10 +68,19 @@ function Get-NativeText($Result) {
     return @($Result.Output | Where-Object { $_ -is [string] })
 }
 
+function Get-NativeDiagnosis($Result) {
+    # The other way round: everything a failed call said, stderr included. git and docker explain
+    # themselves there, and a bare "failed with exit code 1" leaves the operator with nothing to
+    # act on - which is exactly how a transient ref lock turns into a mystery.
+    return @($Result.Output | ForEach-Object { "$_" } | Where-Object { "$_".Trim() })
+}
+
 function Invoke-Git([string[]]$Arguments) {
     $result = Invoke-Native "git" (@("-C", $Repo) + $Arguments)
     if ($result.Code -ne 0) {
-        throw "git $($Arguments -join ' ') failed with exit code $($result.Code)"
+        $why = Get-NativeDiagnosis $result | Select-Object -Last 3
+        $detail = if ($why) { ":`n  " + ($why -join "`n  ") } else { "" }
+        throw "git $($Arguments -join ' ') failed with exit code $($result.Code)$detail"
     }
     return Get-NativeText $result
 }
@@ -204,7 +215,25 @@ if ($Rollback) {
 
 if (-not $SkipFetch) {
     Write-Step "Fetching origin/$Branch"
-    Invoke-Git @("fetch", "--prune", "--tags", "origin", $Branch) | Out-Null
+    # --force: a branch or a tag that moved on the remote (a force-push, a re-tagged release)
+    # must not stop the update - the remote is what gets deployed, and the `merge --ff-only`
+    # below still refuses a history that diverged.
+    # Retried: git answers a ref lock held by a concurrent process with exit code 1, and that
+    # process is usually the push the operator ran a moment ago.
+    $attempts = 3
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-Git @("fetch", "--prune", "--tags", "--force", "origin", $Branch) | Out-Null
+            break
+        } catch {
+            Write-Host "  $($_.Exception.Message)" -ForegroundColor Yellow
+            if ($attempt -ge $attempts) {
+                throw "cannot fetch origin/$Branch (see above); fix that, or deploy what is already checked out with -SkipFetch"
+            }
+            Write-Host "  retrying in 3 s (a concurrent git process may hold a ref lock)" -ForegroundColor Yellow
+            Start-Sleep -Seconds 3
+        }
+    }
 }
 
 $currentBranch = (Invoke-Git @("rev-parse", "--abbrev-ref", "HEAD") | Select-Object -First 1).Trim()
