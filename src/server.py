@@ -4,13 +4,14 @@ FastAPI server for Pinterest archive viewer.
 import os
 import re
 import sqlite3
+from html import escape
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -465,6 +466,101 @@ def version():
     Shown as a badge in the site header and on the extension options page.
     """
     return build_info()
+
+
+#: Copy for every outcome the share page can show. The keys are the `status` and `error`
+#: parameters the service worker puts into the URL.
+SHARE_STATES = {
+    "not_a_pin_link": (
+        "Not a pin link",
+        "Share a link to a pin, for example https://www.pinterest.com/pin/<id>/."
+    ),
+    "pin_not_found": ("Pin not found", "Pinterest does not serve this pin anymore."),
+    "pinterest_unavailable": ("Pinterest is not answering", "Try again in a minute."),
+    "image_unavailable": ("Image unavailable", "Pinterest did not return an image for this pin."),
+    "empty": ("Nothing to save", "The share did not contain a link."),
+    "sw": ("The app has not updated", "Close and reopen the app, then share again."),
+}
+SHARE_START = ("PinSaver", "Share a pin from Pinterest to save it.")
+SHARE_UNKNOWN_ERROR = ("Something went wrong", "Try sharing the pin again.")
+SIZE_LABELS = {"local": "already on disk"}
+
+
+def clean_parameter(value: Optional[str], limit: int = 64) -> str:
+    """Flatten a URL parameter: no newlines, no walls of text, safe to put into the page."""
+    return " ".join((value or "").split())[:limit]
+
+
+def share_text(params: Mapping[str, str]) -> tuple[str, str]:
+    """Heading and message for the share page, from the URL parameters alone."""
+    status = clean_parameter(params.get("status"))
+    error = clean_parameter(params.get("error"))
+    pin = clean_parameter(params.get("pin"), 32)
+    size = clean_parameter(params.get("size"), 16)
+
+    if status == "added":
+        label = SIZE_LABELS.get(size, size)
+        suffix = f" ({label})" if label else ""
+        return "Saved", f"Pin {pin} saved{suffix}."
+    if status == "exists":
+        return "Already in the archive", "Rating is now one higher."
+    if status == "restored":
+        return "Restored", f"Pin {pin} was deleted from Pinterest and is back in the archive."
+    if error:
+        return SHARE_STATES.get(error, SHARE_UNKNOWN_ERROR)
+    return SHARE_START
+
+
+def render_share_page(params: Mapping[str, str]) -> str:
+    """
+    Fill the share page template from the URL parameters.
+
+    Every value is escaped: anyone who knows the URL can open this page with any parameters,
+    and it has to stay a page that only displays text.
+    """
+    heading, message = share_text(params)
+    html = (STATIC_PATH / "share.html").read_text(encoding="utf-8")
+    return html.replace("{{heading}}", escape(heading)).replace("{{message}}", escape(message))
+
+
+@app.get("/share", response_class=HTMLResponse)
+def share_result(request: Request):
+    """
+    The share outcome page.
+
+    Everything it shows comes from the URL, so it can be reloaded or forged without any
+    effect; only the service worker produces those parameters (see `POST /share`).
+    """
+    return HTMLResponse(
+        render_share_page(request.query_params),
+        headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.post("/share")
+def share_fallback() -> RedirectResponse:
+    """
+    Safety net for an install whose service worker is not active yet.
+
+    The body is never read: only the worker turns a share into an archive entry, so a plain
+    POST says so and sends the browser to the outcome page.
+    """
+    return RedirectResponse("/share?error=sw", status_code=303)
+
+
+@app.get("/sw.js")
+def service_worker() -> FileResponse:
+    """
+    Service worker served from the root.
+
+    An explicit route rather than `/static/sw.js`: a worker under `/static/` could only
+    control `/static/`, while the share target posts to `/share`.
+    """
+    return FileResponse(
+        STATIC_PATH / "sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

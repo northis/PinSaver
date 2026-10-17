@@ -476,9 +476,29 @@ document.getElementById('carouselOverlay').addEventListener('click', (e) => {
     }
 });
 
-// Register service worker for PWA
+// The worker lives at the root: one under /static/ could only control /static/, while the
+// share target posts to /share
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js')
+    const scriptOf = registration =>
+        (registration.active || registration.installing || registration.waiting || {}).scriptURL || '';
+
+    // Drop the old /static/sw.js registration: it still controls /static/* and would keep
+    // serving its own cached copies of the site's files. Unregistering does not clear its
+    // cache, so the entries go too.
+    navigator.serviceWorker.getRegistrations().then(registrations => {
+        registrations
+            .filter(registration => scriptOf(registration).endsWith('/static/sw.js'))
+            .forEach(registration => registration.unregister());
+    }).catch(err => console.log('Service Worker cleanup failed:', err));
+
+    if (window.caches) {
+        caches.keys()
+            .then(names => names.filter(name => name.startsWith('pinsaver-'))
+                .forEach(name => caches.delete(name)))
+            .catch(err => console.log('Cache cleanup failed:', err));
+    }
+
+    navigator.serviceWorker.register('/sw.js')
         .then(reg => console.log('Service Worker registered'))
         .catch(err => console.log('Service Worker registration failed:', err));
 }
