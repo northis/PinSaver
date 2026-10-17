@@ -1,6 +1,7 @@
 """
 Database models and schema for Pinterest archive.
 """
+import os
 import sqlite3
 from pathlib import Path
 from dataclasses import dataclass
@@ -21,9 +22,30 @@ class Pin:
     is_deleted: bool = False
 
 
+def get_base_path() -> Path:
+    """
+    Returns the directory that holds the archive data.
+
+    PINSAVER_DATA_DIR points at the mounted data directory inside the container;
+    on the host it is unset and everything lives in the repository root.
+
+    Read on every call, not at import time: tests and the container both point it
+    somewhere else, and the running server must follow.
+    """
+    override = os.getenv("PINSAVER_DATA_DIR")
+    if override:
+        return Path(override)
+    return Path(__file__).parent.parent
+
+
 def get_db_path() -> Path:
     """Returns the path to the SQLite database."""
-    return Path(__file__).parent.parent / "pinterest_archive.db"
+    return get_base_path() / "pinterest_archive.db"
+
+
+def get_originals_path() -> Path:
+    """Returns the directory with the archived original images."""
+    return get_base_path() / "originals"
 
 
 def init_db(db_path: Optional[Path] = None) -> None:

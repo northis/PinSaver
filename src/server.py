@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from buildinfo import build_info
-from models import get_db_path, Pin, insert_pin, pin_exists
+from models import get_db_path, get_originals_path, Pin, insert_pin, pin_exists
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -73,10 +73,6 @@ async def cors_middleware(request: Request, call_next):
         response.headers["Access-Control-Allow-Private-Network"] = "true"
     
     return response
-
-BASE_PATH = Path(__file__).parent.parent
-ORIGINALS_PATH = BASE_PATH / "originals"
-
 
 class AddPinRequest(BaseModel):
     """Request model for adding a new pin."""
@@ -256,7 +252,7 @@ async def add_pin(request: AddPinRequest):
             "message": f"Image already exists in archive (pin {existing_by_file['pin_id']}, rating +1)"
         }
     
-    file_path = ORIGINALS_PATH / f"{file_id}.{file_extension}"
+    file_path = get_originals_path() / f"{file_id}.{file_extension}"
     
     if not file_path.exists():
         try:
@@ -273,7 +269,7 @@ async def add_pin(request: AddPinRequest):
                         fallback_response = await client.get(fallback_url)
                         if fallback_response.status_code == 200:
                             file_extension = 'jpg'
-                            file_path = ORIGINALS_PATH / f"{file_id}.jpg"
+                            file_path = get_originals_path() / f"{file_id}.jpg"
                             file_path.write_bytes(fallback_response.content)
                             downloaded = True
                             break
@@ -387,7 +383,7 @@ def delete_pin(pin_id: str, delete_file: bool = Query(False, description="Also d
     
     file_deleted = False
     if delete_file:
-        file_path = ORIGINALS_PATH / f"{file_id}.{file_extension}"
+        file_path = get_originals_path() / f"{file_id}.{file_extension}"
         if file_path.exists():
             file_path.unlink()
             file_deleted = True
@@ -403,17 +399,26 @@ def delete_pin(pin_id: str, delete_file: bool = Query(False, description="Also d
 def get_image(filename: str):
     """
     Serve an image from the originals folder.
-    
+
+    Only a bare file name is accepted: anything with a path separator (on Windows
+    `\\` counts, and `%5c` reaches the handler as an ordinary character) would let a
+    request read files outside `originals/`.
+
     Args:
         filename: The image filename (file_id.extension).
-    
+
     Returns:
         The image file.
     """
-    file_path = ORIGINALS_PATH / filename
-    if not file_path.exists():
-        return {"error": "Image not found"}, 404
-    
+    originals_path = get_originals_path().resolve()
+    file_path = (originals_path / filename).resolve()
+
+    if Path(filename).name != filename or not file_path.is_relative_to(originals_path):
+        raise HTTPException(status_code=404, detail="image not found")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+
     return FileResponse(file_path)
 
 
