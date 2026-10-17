@@ -1,0 +1,39 @@
+# Fragment for the sitehub repository: paste into traefik/dynamic/vpn-sites.yml
+# (the file provider watches it, no restart needed). Replace pinsaver.example.com with the
+# real domain and 10.77.77.21 with the address of this machine inside the SoftEther VPN.
+# Sitehub does not expand ${...} in its config files, so both values must be literal.
+#
+# Two routers on purpose:
+#
+#   pinsaver      everything, behind the Access JWT check. Cloudflare Access is the only
+#                 gate in front of the archive, so this middleware is not optional.
+#
+#   pinsaver-pwa  the manifest and the two icons only, WITHOUT the check. Android builds
+#                 the WebAPK on Google's servers, and those fetch the manifest and the
+#                 icons without a session: with the check they get 401, the app cannot be
+#                 installed, and PinSaver never appears in the system share sheet.
+#                 The same two paths also need a Bypass policy in Cloudflare Access
+#                 (dashboard, not this file) - both layers are independent.
+#
+# Check after pasting (both must answer 200 without a session):
+#   curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.example.com/static/manifest.json
+#   curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.example.com/static/icon-192.png
+# and that the site itself does not open without a session.
+
+http:
+  routers:
+    pinsaver:
+      rule: "Host(`pinsaver.example.com`)"
+      service: pinsaver
+      middlewares: [cf-access-verify@file]
+
+    pinsaver-pwa:
+      rule: "Host(`pinsaver.example.com`) && (Path(`/static/manifest.json`) || Path(`/static/icon-192.png`) || Path(`/static/icon-512.png`))"
+      service: pinsaver
+      priority: 100
+
+  services:
+    pinsaver:
+      loadBalancer:
+        servers:
+          - url: "http://10.77.77.21:8000"
