@@ -8,7 +8,7 @@ marks already-archived pins in favorites and pushes the archive back to Pinteres
 
 | Path | What is there |
 | --- | --- |
-| `src/` | FastAPI server and hand-run scripts (`server.py`, `models.py`, `importer.py`, `updateDelete.py`, `backup.py`, `buildinfo.py`) |
+| `src/` | FastAPI server and hand-run scripts (`server.py`, `models.py`, `archive.py`, `pinterest.py`, `importer.py`, `updateDelete.py`, `backup.py`, `buildinfo.py`) |
 | `src/static/` | web UI served as-is, no build step (HTML/CSS/JS, PWA manifest, service worker) |
 | `extension/` | Chrome MV3 extension (content script, service worker, options page, icons) |
 | `tools/` | scripts run by hand whose output is committed (`make_extension_icons.py`, `bump_version.py`) |
@@ -78,6 +78,14 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
 - Mutating endpoints require `X-PinSaver-Request: 1` and reject foreign `http(s)` origins. Any new
   mutating route must take `Depends(require_csrf)`, and every client must send the header
   (`background.js` for the extension, `app.js` for the site, the service worker for the share flow).
+- `GET /share` renders from the URL parameters only and must never read the database or write:
+  anyone can open it with any parameters. Saving happens in `POST /api/pins/resolve`.
+- `src/static/sw.js` intercepts exactly one request (`POST /share`) and caches nothing; it is served
+  from the root by an explicit route so it can control `/share`. Keep it that way: the old
+  `/static/sw.js` registration is unregistered and its caches dropped by `app.js`.
+- `src/pinterest.py` resolves a link anonymously (no cookies). Its parser is a pure function and
+  `tests/fixtures/pin_page.html` drives it: refresh the fixture with
+  `python tools/resolve_pin.py <pin link> --save-fixture` when Pinterest changes its markup.
 
 ## Conventions
 

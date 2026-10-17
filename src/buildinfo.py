@@ -13,7 +13,7 @@ import re
 import subprocess
 from pathlib import Path
 
-__version__ = "2.0.1"
+__version__ = "2.1.0"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPO_URL = "https://github.com/northis/PinSaver"

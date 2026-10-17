@@ -186,6 +186,32 @@ worktree** этого коммита (незакоммиченные правк�
 коммита (приходит с сервера, ведёт на коммит в GitHub). Если сервер недоступен, вместо хеша
 показывается «server unavailable».
 
+## Сохранение с телефона (share)
+
+На Android пин можно сохранить прямо из приложения Pinterest: «Поделиться» → PinSaver. Сервер сам
+откроет страницу пина анонимно, найдёт картинку и положит её в архив — cookie Pinterest для этого не
+нужны, приватных пинов в архиве нет.
+
+Что нужно:
+
+1. сайт опубликован (см. «Публикация в интернете»): share target работает только у установленного
+   приложения, а установка требует HTTPS и service worker;
+2. на телефоне откройте сайт в Chrome и установите его (⋮ → «Установить приложение»);
+3. после обновления сайта до версии с share-целью приложение может держать старый манифест —
+   **удалите и установите его заново**, иначе шара ответит «The app has not updated»;
+4. сделайте сессию Cloudflare Access подлиннее: если она истечёт, шара упрётся в страницу входа.
+
+Как это работает: системное «Поделиться» шлёт `POST /share`; service worker (`/sw.js`) перехватывает
+ровно эту навигацию, читает ссылку и вызывает `POST /api/pins/resolve` с заголовком гарда, а затем
+переводит браузер на страницу результата (`/share?status=…`). Страница знает только параметры URL и
+показывает `Saved`, `Already in the archive` или причину; если сервер не отвечает, worker показывает
+свою страницу вместо ошибки Traefik.
+
+Тот же резолвер доступен и с ПК: в шапке сайта есть поле и кнопка **Save link** — вставьте ссылку
+(`pinterest.com/pin/…` или `pin.it/…`) и нажмите кнопку.
+
+iOS share-цель не поддерживает — там остаётся Save link на сайте.
+
 ## Веб-интерфейс
 
 - сортировки **Newest / Oldest / Top / Random** и кнопка **Deleted** — показать только то, что
@@ -266,6 +292,7 @@ python tools/make_extension_icons.py
 | `python src/buildinfo.py` | напечатать версию, коммит и ссылки |
 | `python tools/bump_version.py X.Y.Z` | поднять версию в `src/` и `extension/` |
 | `python tools/make_extension_icons.py` | перерисовать PNG-иконки из `extension/icon.svg` |
+| `python tools/resolve_pin.py <ссылка>` | проверить резолвер на живой ссылке (`--save-fixture` обновляет фикстуру тестов) |
 | `playwright install chromium` | поставить браузер для `updateDelete.py` |
 | `python -m pytest -q` | офлайн-тесты (архив и сеть не трогают) |
 | `docker compose up -d --build` | собрать и поднять сайт в контейнере |
@@ -280,7 +307,11 @@ python tools/make_extension_icons.py
 | GET | `/api/pins/sync` | идентификаторы всех не удалённых пинов — для синхронизации |
 | POST | `/api/pins` | добавить пин (`pin_id`, `original_url`) |
 | POST | `/api/pins/check` | проверить, какие пины уже в архиве (`pins[]` из `pin_id`, `file_id`) |
+| POST | `/api/pins/resolve` | сохранить пин по ссылке (`url`) — тот же путь, что у шаринга |
 | DELETE | `/api/pins/{pin_id}` | удалить пин (`delete_file` — вместе с картинкой) |
+| GET | `/share` | страница результата шаринга: собирается только из параметров URL |
+| POST | `/share` | заглушка share target: тело не читается, `303` на `?error=sw` |
+| GET | `/sw.js` | service worker из корня: перехват `POST /share`, кеша нет |
 | GET | `/api/version` | версия, коммит и ссылки на репозиторий |
 | GET | `/images/{filename}` | отдать картинку из `originals/` |
 | GET | `/health` | проверка доступности сервера |
@@ -291,8 +322,10 @@ python tools/make_extension_icons.py
 ```
 PinSaver/
 ├── src/
-│   ├── server.py             # FastAPI: API, отдача сайта и картинок
-│   ├── models.py             # схема SQLite и модель Pin
+│   ├── server.py             # FastAPI: API, отдача сайта и картинок, /share и /sw.js
+│   ├── models.py             # схема SQLite, модель Pin и пути к данным
+│   ├── archive.py            # добавление пина: дедуп, рейтинг, фолбэки скачивания
+│   ├── pinterest.py          # резолвер: ссылка → file_id и ссылка на картинку
 │   ├── buildinfo.py          # версия и коммит (источник версии проекта)
 │   ├── parser.py             # разбор HTML-экспорта Pinterest
 │   ├── importer.py           # импорт разобранных пинов в базу
@@ -302,7 +335,7 @@ PinSaver/
 │   ├── requirements.txt      # рантайм: его же ставит контейнер
 │   ├── requirements-tools.txt # хостовые скрипты: Playwright, BeautifulSoup, Pillow
 │   ├── requirements-dev.txt  # pytest
-│   └── static/               # сайт: index.html, app.js, styles.css, sw.js, PWA-иконки
+│   └── static/               # сайт: index.html, app.js, styles.css, sw.js, share.html, PWA-иконки
 ├── Dockerfile                # образ: только рантайм, архив монтируется
 ├── docker-compose.yml        # запуск, порты, монтирование /data
 ├── deploy/
@@ -320,6 +353,7 @@ PinSaver/
 │   └── icon16/32/48/128.png  # PNG-иконки, отрисованные из icon.svg
 ├── tools/
 │   ├── make_extension_icons.py  # SVG → PNG-иконки расширения
+│   ├── resolve_pin.py           # резолвер вручную + обновление фикстуры тестов
 │   └── bump_version.py          # версия в src/ и extension/ + проверка синхронности
 ├── originals/                # оригиналы картинок (в git не попадает)
 ├── pinterest_archive.db      # база SQLite (в git не попадает)
@@ -336,6 +370,9 @@ PinSaver/
   ни добавить, ни удалить пин. Расширение и service worker ставят заголовок сами.
 - `GET /images/{filename}` принимает только простое имя файла: до 2.0.0 `..%5c..` позволял прочитать
   любой файл на машине, включая `.env` и саму базу — теперь это закрыто и покрыто тестом.
+- `/share` в базу не пишет вообще: страница результата собирается из параметров URL, а сохранение
+  идёт только через `POST /api/pins/resolve` под гардом. Service worker не кеширует ничего, поэтому
+  устаревшая страница или чужой ответ в кеше появиться не могут.
 - У контейнера нет доступа к `docker.sock`, git и хосту: обновление запускается вручную с хоста
   (`deploy\windows\update.ps1`).
 - Из браузера к API обращается только расширение: CORS открыт исключительно для `*.pinterest.com`
