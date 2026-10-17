@@ -12,6 +12,9 @@ marks already-archived pins in favorites and pushes the archive back to Pinteres
 | `src/static/` | web UI served as-is, no build step (HTML/CSS/JS, PWA manifest, service worker) |
 | `extension/` | Chrome MV3 extension (content script, service worker, options page, icons) |
 | `tools/` | scripts run by hand whose output is committed (`make_extension_icons.py`, `bump_version.py`) |
+| `tests/` | offline pytest suite (`PINSAVER_DATA_DIR` points it at a temporary directory) |
+| `Dockerfile`, `docker-compose.yml` | the image (runtime only) and how it runs: the archive is bind-mounted |
+| `deploy/` | host-side update script (`windows/update.ps1`) and the sitehub fragment (`sitehub/pinsaver.yml`) |
 | `originals/`, `pinterest_archive.db`, `backups/` | data — never committed |
 
 ## Commands
@@ -29,6 +32,9 @@ python tools/bump_version.py X.Y.Z              # bump the version everywhere
 python tools/bump_version.py --check            # verify every copy of the version matches
 python tools/make_extension_icons.py            # regenerate extension PNGs from extension/icon.svg
 python -m pytest -q                             # the offline test suite
+docker compose up -d --build                    # build and run the site in a container
+docker compose ps                               # healthy means the healthcheck passed
+powershell -ExecutionPolicy Bypass -File deploy\windows\update.ps1   # host-side update with rollback
 ```
 
 `requirements.txt` is the runtime (the container installs exactly that); `requirements-tools.txt` adds
@@ -54,6 +60,24 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
   the commit from the server, so the badge is never stale.
 - The extension icons are generated from `extension/icon.svg` by `tools/make_extension_icons.py`
   (Chrome does not accept SVG icons); never edit the PNGs by hand.
+
+## Deployment
+
+- The site runs in a container **on the owner's PC**, next to the archive; sitehub (Traefik on the
+  Ubuntu host) reaches it over the SoftEther VPN at `${PINSAVER_BIND_ADDR}` (default `10.77.77.21`),
+  and Cloudflare Access is the only gate in front of it. Nothing inside the app authenticates.
+- **Exactly three paths are public** — `/static/manifest.json`, `/static/icon-192.png`,
+  `/static/icon-512.png` — in two independent layers: a Bypass policy in Cloudflare Access and the
+  `pinsaver-pwa` router in sitehub (`deploy/sitehub/pinsaver.yml`). Google's WebAPK builder fetches
+  them without a session; without them Android cannot install the app. Everything else, including
+  `/api/*`, `/images/*` and `/share`, stays behind the JWT check.
+- The archive is never baked into the image: `docker-compose.yml` mounts the working copy as `/data`
+  and the image sets `PINSAVER_DATA_DIR=/data`. The container has no git and no `docker.sock`; the
+  commit it reports comes from `.git/HEAD` and `refs/`, which `.dockerignore` keeps in the build
+  context, or from the `PINSAVER_COMMIT` build arg that `update.ps1` passes.
+- Mutating endpoints require `X-PinSaver-Request: 1` and reject foreign `http(s)` origins. Any new
+  mutating route must take `Depends(require_csrf)`, and every client must send the header
+  (`background.js` for the extension, `app.js` for the site, the service worker for the share flow).
 
 ## Conventions
 

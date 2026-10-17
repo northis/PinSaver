@@ -31,6 +31,9 @@ Chrome, которое сохраняет пины прямо со страни�
 | `src/static/` | веб-интерфейс (vanilla JS/CSS/HTML, без сборки) и PWA-манифест |
 | `extension/` | расширение Chrome MV3 (content script, service worker, страница настроек, иконки) |
 | `tools/` | скрипты, которые запускают руками, а результат коммитят (`make_extension_icons.py`, `bump_version.py`) |
+| `Dockerfile`, `docker-compose.yml` | сборка образа и запуск: в образ идёт только рантайм, архив монтируется с хоста |
+| `deploy/` | хостовые скрипты и конфиги: `windows/update.ps1`, `sitehub/pinsaver.yml` |
+| `tests/` | офлайн-тесты (pytest): архив не трогают, сети не требуют |
 | `originals/`, `pinterest_archive.db`, `backups/` | данные, в git не попадают |
 
 ## Быстрый старт
@@ -87,6 +90,73 @@ python src/server.py
 2. «Загрузить распакованное расширение» → папка `extension/`.
 3. Открой настройки расширения (клик по иконке в панели или «Подробнее» → «Параметры расширения»)
    и проверь адрес сервера — по умолчанию `http://localhost:8000`.
+
+## Запуск в Docker
+
+```bash
+docker compose up -d --build
+```
+
+В образ идёт только рантайм (`src/requirements.txt`), а архив — база, `originals/` и `backups/` —
+монтируется с хоста как `/data`, поэтому пересборка и удаление контейнера данные не трогают.
+Порт публикуется дважды, и это осознанно: `127.0.0.1:8000` нужен расширению (в его
+`host_permissions` только localhost и 127.0.0.1), а `${PINSAVER_BIND_ADDR}:8000` — Traefik'у на
+хосте sitehub, куда тот ходит по VPN. Настройки — в `.env` (см. `.env.example`).
+
+```bash
+curl http://127.0.0.1:8000/api/version   # версия и коммит, вшитые в образ
+docker compose ps                        # healthy означает, что healthcheck прошёл
+docker compose logs -f pinsaver          # логи: json-file, 10 МБ x 3
+docker compose down                      # остановить; данные остаются на месте
+```
+
+Версия и коммит попадают в образ двумя путями: `update.ps1` передаёт их build-аргументами, а при
+обычной сборке коммит читается из `.git/HEAD` и `refs/`, которые `.dockerignore` оставляет в образе
+(самого git в контейнере нет). Поэтому бейдж на сайте и `/api/version` показывают то, что реально
+собрано, а не то, что лежит в рабочей копии.
+
+## Публикация в интернете: sitehub + Cloudflare Access
+
+Сайт живёт на этом ПК, а наружу его отдаёт [sitehub](https://github.com/northis/sitehub) — Traefik на
+Ubuntu-сервере с wildcard-сертификатом, который ходит к нам по SoftEther VPN на
+`${PINSAVER_BIND_ADDR}:8000`. Порядок:
+
+1. Контейнер поднят на ПК (`docker compose up -d`), адрес в VPN — тот же, что у duosave
+   (`10.77.77.21`).
+2. В sitehub в `traefik/dynamic/vpn-sites.yml` вставляется фрагмент `deploy/sitehub/pinsaver.yml`
+   (заменить домен и адрес VPN). Он добавляет **два** роутера: основной — за проверкой
+   `cf-access-verify@file`, и публичный для трёх путей: `/static/manifest.json`,
+   `/static/icon-192.png`, `/static/icon-512.png`. Без публичного роутера Google не соберёт WebAPK,
+   и PinSaver не появится в системном «Поделиться».
+3. В Cloudflare Access этим же трём путям нужна политика **Bypass** (Include = Everyone): политика на
+   крае и проверка на входе sitehub — два независимых слоя, нужны оба.
+4. Проверка:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.<домен>/static/manifest.json   # 200 без сессии
+curl -s -o /dev/null -w '%{http_code}\n' https://pinsaver.<домен>/static/icon-192.png    # 200 без сессии
+```
+
+Сайт без сессии Access открываться не должен: внутри приложения авторизации нет, Access — единственный
+вход снаружи. Порт `8000` в интернет не публикуется (в `ports` только `127.0.0.1` и VPN-адрес), а
+изменяющие запросы требуют заголовок `X-PinSaver-Request: 1` и отвергают чужие источники.
+
+## Обновление
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\windows\update.ps1
+powershell -ExecutionPolicy Bypass -File deploy\windows\update.ps1 -Rollback
+```
+
+Скрипт делает `git fetch`, fast-forward, читает версию в целевом коммите, собирает образ из **чистого
+worktree** этого коммита (незакоммиченные правки в образ не попадают), поднимает контейнер и ждёт,
+пока `/api/version` не покажет новый коммит; если не дождался — возвращает прошлый образ и падает с
+ошибкой. Если контейнер уже на нужном коммите, скрипт просто выходит (`-Force` — пересобрать).
+
+Руками то же самое: `git pull` и `docker compose up -d --build`.
+
+После обновления сервера **перезагрузите расширение** в `chrome://extensions`: в нём появился заголовок
+гарда, и старое расширение получит `403` с текстом «reload the extension».
 
 ## Расширение Chrome
 
@@ -197,6 +267,10 @@ python tools/make_extension_icons.py
 | `python tools/bump_version.py X.Y.Z` | поднять версию в `src/` и `extension/` |
 | `python tools/make_extension_icons.py` | перерисовать PNG-иконки из `extension/icon.svg` |
 | `playwright install chromium` | поставить браузер для `updateDelete.py` |
+| `python -m pytest -q` | офлайн-тесты (архив и сеть не трогают) |
+| `docker compose up -d --build` | собрать и поднять сайт в контейнере |
+| `docker compose down` | остановить контейнер (данные на хосте остаются) |
+| `deploy\windows\update.ps1` | обновление с хоста: сборка из чистого worktree, откат при неудаче |
 
 ## API
 
@@ -225,8 +299,16 @@ PinSaver/
 │   ├── migrate_duplicates.py # схлопывание дубликатов по file_id
 │   ├── updateDelete.py       # проверка удалённых пинов через Playwright
 │   ├── backup.py             # инкрементальные бэкапы
-│   ├── requirements.txt      # зависимости Python
+│   ├── requirements.txt      # рантайм: его же ставит контейнер
+│   ├── requirements-tools.txt # хостовые скрипты: Playwright, BeautifulSoup, Pillow
+│   ├── requirements-dev.txt  # pytest
 │   └── static/               # сайт: index.html, app.js, styles.css, sw.js, PWA-иконки
+├── Dockerfile                # образ: только рантайм, архив монтируется
+├── docker-compose.yml        # запуск, порты, монтирование /data
+├── deploy/
+│   ├── windows/update.ps1    # обновление с хоста с откатом
+│   └── sitehub/pinsaver.yml  # фрагмент для traefik/dynamic/vpn-sites.yml
+├── tests/                    # офлайн-тесты pytest
 ├── extension/
 │   ├── manifest.json         # манифест MV3 (версия синхронизируется bump_version.py)
 │   ├── background.js         # service worker: прокси API-запросов, клик по иконке
@@ -247,8 +329,15 @@ PinSaver/
 
 ## Данные и безопасность
 
-- Сервер не имеет авторизации и по умолчанию слушает `0.0.0.0` — держи его в доверенной сети и не
-  выставляй в интернет.
+- Внутри приложения авторизации нет: единственный вход снаружи — Cloudflare Access (см. «Публикация в
+  интернете»). Локально сервер слушает `0.0.0.0` — держи его в доверенной сети.
+- Изменяющие запросы (`POST /api/pins`, `POST /api/pins/check`, `DELETE /api/pins/{pin_id}`) требуют
+  заголовок `X-PinSaver-Request: 1` и отвергают чужие `http(s)`-источники: страница со стороны не может
+  ни добавить, ни удалить пин. Расширение и service worker ставят заголовок сами.
+- `GET /images/{filename}` принимает только простое имя файла: до 2.0.0 `..%5c..` позволял прочитать
+  любой файл на машине, включая `.env` и саму базу — теперь это закрыто и покрыто тестом.
+- У контейнера нет доступа к `docker.sock`, git и хосту: обновление запускается вручную с хоста
+  (`deploy\windows\update.ps1`).
 - Из браузера к API обращается только расширение: CORS открыт исключительно для `*.pinterest.com`
   (и только чтобы обойти Private Network Access), остальные источники получают отказ.
 - `pinterest_archive.db`, `originals/`, `backups/`, `testPages/` и `.env` перечислены в `.gitignore` —
