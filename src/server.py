@@ -4,8 +4,6 @@ FastAPI server for Pinterest archive viewer.
 import os
 import re
 import sqlite3
-import time
-import httpx
 from pathlib import Path
 from typing import Optional
 
@@ -16,8 +14,9 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from archive import AddPinError, add_pin_from_url
 from buildinfo import build_info
-from models import get_db_path, get_originals_path, Pin, insert_pin, pin_exists
+from models import get_db_path, get_originals_path
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -242,122 +241,36 @@ def get_pins_for_sync():
 
 
 @app.post("/api/pins")
-async def add_pin(request: AddPinRequest, _: None = Depends(require_csrf)):
+def add_pin(request: AddPinRequest, _: None = Depends(require_csrf)):
     """
     Add a new pin to the archive.
-    
+
     Downloads the original image and saves it to the originals folder,
     then adds the pin metadata to the database.
-    
+
     Args:
         request: AddPinRequest with pin_id and original_url.
-    
+
     Returns:
         Dictionary with status and pin info.
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Check if pin_id already exists
-    cursor.execute("SELECT id, rating FROM pins WHERE pin_id = ?", (request.pin_id,))
-    existing_by_pin = cursor.fetchone()
-    if existing_by_pin:
-        # Increment rating for duplicate attempt
-        cursor.execute("UPDATE pins SET rating = rating + 1 WHERE id = ?", (existing_by_pin['id'],))
-        conn.commit()
+    try:
+        result = add_pin_from_url(conn, request.pin_id, request.original_url)
+    except AddPinError as error:
+        status_code = 400 if error.reason == "invalid_url" else 500
+        raise HTTPException(status_code=status_code, detail=error.detail or error.reason)
+    finally:
         conn.close()
-        return {
-            "status": "exists",
-            "message": f"Pin {request.pin_id} already exists in archive (rating +1)"
+
+    response = {"status": result.status, "message": result.message}
+    if result.status == "added":
+        response["pin"] = {
+            "pin_id": result.pin_id,
+            "file_id": result.file_id,
+            "file_extension": result.file_extension
         }
-    
-    match = re.search(r'/([a-f0-9]{32})\.(\w+)(?:\?|$)', request.original_url)
-    if not match:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Invalid original_url format")
-    
-    file_id = match.group(1)
-    file_extension = match.group(2)
-    
-    # Check if file_id already exists (same image, different pin)
-    cursor.execute("SELECT id, pin_id, rating, is_deleted FROM pins WHERE file_id = ?", (file_id,))
-    existing_by_file = cursor.fetchone()
-    if existing_by_file:
-        # If the existing pin was deleted, restore it with new pin_id (don't increment rating)
-        if existing_by_file['is_deleted']:
-            cursor.execute(
-                "UPDATE pins SET pin_id = ?, pinterest_url = ?, is_deleted = 0 WHERE id = ?",
-                (request.pin_id, f"https://pinterest.com/pin/{request.pin_id}/", existing_by_file['id'])
-            )
-            conn.commit()
-            conn.close()
-            return {
-                "status": "restored",
-                "message": f"Pin restored with new ID {request.pin_id} (was {existing_by_file['pin_id']})"
-            }
-        # Otherwise increment rating for duplicate attempt
-        cursor.execute("UPDATE pins SET rating = rating + 1 WHERE id = ?", (existing_by_file['id'],))
-        conn.commit()
-        conn.close()
-        return {
-            "status": "exists",
-            "message": f"Image already exists in archive (pin {existing_by_file['pin_id']}, rating +1)"
-        }
-    
-    file_path = get_originals_path() / f"{file_id}.{file_extension}"
-    
-    if not file_path.exists():
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(request.original_url)
-                
-                # If original fails (HEIC or unavailable), try fallback sizes
-                if response.status_code in (403, 404) or file_extension.lower() == 'heic':
-                    fallback_sizes = ['736x', '564x', '474x', '236x']
-                    downloaded = False
-                    
-                    for size in fallback_sizes:
-                        fallback_url = f"https://i.pinimg.com/{size}/{file_id[:2]}/{file_id[2:4]}/{file_id[4:6]}/{file_id}.jpg"
-                        fallback_response = await client.get(fallback_url)
-                        if fallback_response.status_code == 200:
-                            file_extension = 'jpg'
-                            file_path = get_originals_path() / f"{file_id}.jpg"
-                            file_path.write_bytes(fallback_response.content)
-                            downloaded = True
-                            break
-                    
-                    if not downloaded:
-                        conn.close()
-                        raise HTTPException(status_code=500, detail="Failed to download image: no available format")
-                else:
-                    response.raise_for_status()
-                    file_path.write_bytes(response.content)
-        except httpx.HTTPError as e:
-            conn.close()
-            raise HTTPException(status_code=500, detail=f"Failed to download image: {str(e)}")
-    
-    pin = Pin(
-        pin_id=request.pin_id,
-        file_id=file_id,
-        file_extension=file_extension,
-        pinterest_url=f"https://pinterest.com/pin/{request.pin_id}/",
-        original_url=request.original_url,
-        source_date=int(time.time())
-    )
-    
-    insert_pin(conn, pin)
-    conn.commit()
-    conn.close()
-    
-    return {
-        "status": "added",
-        "message": f"Pin {request.pin_id} added to archive",
-        "pin": {
-            "pin_id": pin.pin_id,
-            "file_id": pin.file_id,
-            "file_extension": pin.file_extension
-        }
-    }
+    return response
 
 
 class PinCheckItem(BaseModel):
