@@ -38,75 +38,134 @@ $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Service = "pinsaver"
 $Image = "pinsaver:latest"
 $PreviousImage = "pinsaver:previous"
-$VersionUrl = "http://127.0.0.1:8000/api/version"
 
 function Write-Step([string]$Text) {
     Write-Host ""
     Write-Host "== $Text" -ForegroundColor Cyan
 }
 
-function Invoke-Git([string[]]$Arguments) {
-    # stderr is deliberately NOT redirected: with $ErrorActionPreference = "Stop", merging a
-    # native command's stderr turns git's progress output ("From https://...") into a
-    # terminating NativeCommandError. It goes to the console instead, and the exit code decides.
-    $output = & git -C $Repo @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "git $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+function Invoke-Native([string]$File, [string[]]$Arguments) {
+    # Windows PowerShell 5.1 turns a native command's stderr into a *terminating* error as soon as
+    # the stream is redirected and $ErrorActionPreference is Stop - and both docker and git write
+    # progress, warnings and tracebacks to stderr. Drop the preference for the call, merge the
+    # streams, and let the exit code decide. Output mixes real lines with error records: callers
+    # keep the strings.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $File @Arguments 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
     }
-    return $output
+    return [pscustomobject]@{ Output = @($output); Code = $code }
+}
+
+function Get-NativeText($Result) {
+    # Real output lines only: stderr arrives as error records and is not data.
+    return @($Result.Output | Where-Object { $_ -is [string] })
+}
+
+function Invoke-Git([string[]]$Arguments) {
+    $result = Invoke-Native "git" (@("-C", $Repo) + $Arguments)
+    if ($result.Code -ne 0) {
+        throw "git $($Arguments -join ' ') failed with exit code $($result.Code)"
+    }
+    return Get-NativeText $result
 }
 
 function Get-RunningCommit {
-    # A plain .NET request on purpose: in Windows PowerShell 5.1 the first Invoke-RestMethod of a
-    # session warms up the Internet Explorer parser, which adds seconds to the very first poll of
-    # a loop that is supposed to notice a container coming up.
-    try {
-        $client = New-Object System.Net.WebClient
-        $client.Headers.Add("Accept", "application/json")
-        $json = $client.DownloadString($VersionUrl)
-        $client.Dispose()
-        return [string]($json | ConvertFrom-Json).commit
-    } catch {
+    # Ask the container itself through the Docker CLI, the way duosave does. Going through the
+    # host's published port was fragile: Docker Desktop wires 127.0.0.1:8000 up a moment after the
+    # container starts, and a local filter can answer in the app's place. This way the answer always
+    # comes from the process we are waiting for, and $script:ProbeError says why not.
+    $script:ProbeError = ""
+    # A single line on purpose: a multi-line script does not survive the trip through the Docker
+    # CLI as an argument (it arrives with its newlines mangled and Python refuses it). The wrapper
+    # above swallows the traceback if the request fails, and the exit code is what counts.
+    $probe = "import json, urllib.request; " +
+        "print(json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/version', timeout=3))['commit'])"
+    $result = Invoke-Native "docker" @(
+        "compose", "--project-directory", $Repo, "exec", "-T", $Service, "python", "-c", $probe
+    )
+    if ($result.Code -ne 0) {
+        $script:ProbeError = "the container is not answering yet"
         return ""
     }
+    $line = Get-NativeText $result | Select-Object -First 1
+    return "$line".Trim()
 }
 
 function Wait-ForCommit([string]$Expected, [int]$Seconds) {
-    # Prints a dot per poll: a silent loop that may legitimately run for two minutes looks exactly
-    # like a hang, and this one used to be silent.
+    # Prints a dot per poll and names whatever the container says instead: a silent loop that may
+    # legitimately run for two minutes looks exactly like a hang.
     $deadline = (Get-Date).AddSeconds($Seconds)
-    $reported = ""
+    $detail = ""
     while ((Get-Date) -lt $deadline) {
         $seen = Get-RunningCommit
         if ($seen -eq $Expected) {
             Write-Host " ok" -ForegroundColor Green
             return $true
         }
-        if ($seen -and $seen -ne $reported) {
-            $reported = $seen
+        if ($seen) {
+            $now = "the container still reports $($seen.Substring(0, 7))"
+        } else {
+            $now = $script:ProbeError
+        }
+        if ($now -and $now -ne $detail) {
+            $detail = $now
             Write-Host ""
-            Write-Host "  container still reports $($seen.Substring(0, 7))" -ForegroundColor Yellow
+            Write-Host "  $now" -ForegroundColor Yellow
             Write-Host "  waiting" -NoNewline
         }
         Write-Host "." -NoNewline
         Start-Sleep -Seconds 2
     }
     Write-Host ""
+    if ($detail) {
+        Write-Host "  last answer: $detail" -ForegroundColor Yellow
+    }
     return $false
+}
+
+function Test-PublishedPort {
+    # A container that reports the right commit is not the same as a site answering on this
+    # machine: Docker Desktop publishes the port a moment later. Warn, never fail: the update
+    # itself has already succeeded.
+    $result = Invoke-Native "docker" @("compose", "--project-directory", $Repo, "port", $Service, "8000")
+    $published = Get-NativeText $result | Select-Object -First 1
+    if (-not $published) {
+        return
+    }
+
+    $address = $published.Trim()
+    try {
+        $client = New-Object System.Net.WebClient
+        $client.DownloadString("http://$address/health") | Out-Null
+        $client.Dispose()
+        Write-Host "the site answers on http://$address" -ForegroundColor Green
+    } catch {
+        Write-Host "warning: the container is up, but http://$address does not answer from here" -ForegroundColor Yellow
+        Write-Host "  Docker Desktop sometimes needs a moment to publish the port. If it stays silent," -ForegroundColor Yellow
+        Write-Host "  check 'docker compose ps' and 'docker compose logs $Service'." -ForegroundColor Yellow
+    }
 }
 
 function Start-Site {
     # Not named Start-Service: that is a built-in cmdlet, and shadowing it is a trap.
-    & docker compose --project-directory $Repo up -d --no-build $Service
-    if ($LASTEXITCODE -ne 0) {
+    $result = Invoke-Native "docker" @(
+        "compose", "--project-directory", $Repo, "up", "-d", "--no-build", $Service
+    )
+    if ($result.Code -ne 0) {
+        Get-NativeText $result | ForEach-Object { Write-Host "  $_" }
         throw "docker compose up failed"
     }
 }
 
 function Restore-PreviousImage {
     Write-Host "restoring $PreviousImage" -ForegroundColor Yellow
-    & docker tag $PreviousImage $Image
-    if ($LASTEXITCODE -ne 0) {
+    $tagged = Invoke-Native "docker" @("tag", $PreviousImage, $Image)
+    if ($tagged.Code -ne 0) {
         Write-Host "no $PreviousImage to restore" -ForegroundColor Yellow
         return
     }
@@ -132,8 +191,8 @@ foreach ($tool in @("git", "docker")) {
         throw "$tool is not in PATH"
     }
 }
-& docker info | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$dockerInfo = Invoke-Native "docker" @("info")
+if ($dockerInfo.Code -ne 0) {
     throw "Docker Desktop is not running"
 }
 
@@ -219,5 +278,7 @@ if (-not (Wait-ForCommit $target $TimeoutSeconds)) {
 }
 
 Remove-OldImages $KeepImages
+
 Write-Host ""
 Write-Host "PinSaver $version ($short) is up" -ForegroundColor Green
+Test-PublishedPort
