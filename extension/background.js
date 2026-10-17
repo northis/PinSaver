@@ -30,7 +30,13 @@ async function handleApiRequest(url, options) {
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     
     try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
+        // The server refuses mutating requests without this header; a foreign page cannot
+        // set it (its preflight is rejected), while the extension keeps its own origin
+        const response = await fetch(url, {
+            ...options,
+            headers: { 'X-PinSaver-Request': '1', ...(options && options.headers) },
+            signal: controller.signal
+        });
         
         if (!response.ok) {
             const text = await response.text();

@@ -408,7 +408,8 @@ async function confirmDelete() {
 
     try {
         const response = await fetch(`/api/pins/${pinId}?delete_file=${deleteFile}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'X-PinSaver-Request': '1' }
         });
 
         if (!response.ok) {

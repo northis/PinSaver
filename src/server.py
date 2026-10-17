@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import Depends, FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,6 +40,58 @@ def is_pinterest_origin(origin: str) -> bool:
         return False
     import re
     return bool(re.match(r'^https://([a-z0-9-]+\.)?pinterest\.com$', origin))
+
+
+CSRF_HEADER = "X-PinSaver-Request"
+DEFAULT_PORTS = (":80", ":443")
+
+
+def _strip_default_port(host: str) -> str:
+    """Drop a default port so `example.com` and `example.com:443` compare equal."""
+    for port in DEFAULT_PORTS:
+        if host.endswith(port):
+            return host[: -len(port)]
+    return host
+
+
+def _effective_host(request: Request) -> str:
+    """Host the request was addressed to: X-Forwarded-Host first (Traefik sets it)."""
+    forwarded = request.headers.get("x-forwarded-host")
+    host = forwarded.split(",")[0] if forwarded else (request.headers.get("host") or "")
+    return _strip_default_port(host.strip().lower())
+
+
+def _origin_host(origin: str) -> str | None:
+    """Host of an Origin header, or None when it is not a usable URL."""
+    if not origin or origin == "null":
+        return None
+    from urllib.parse import urlsplit
+
+    try:
+        netloc = urlsplit(origin).netloc
+    except ValueError:
+        return None
+    return _strip_default_port(netloc.lower()) or None
+
+
+def require_csrf(request: Request) -> None:
+    """
+    Guard every mutating request: a custom header plus a cross-site check.
+
+    A foreign page cannot set the header (its preflight would be refused), and a
+    cross-site web page always sends an http(s) Origin that does not match our host.
+    Non-browser clients (curl, the extension, the service worker) send either no Origin
+    or a `chrome-extension://` one, so they pass.
+    """
+    if request.headers.get(CSRF_HEADER) != "1":
+        raise HTTPException(
+            status_code=403,
+            detail="missing X-PinSaver-Request header — reload the extension"
+        )
+
+    origin = request.headers.get("origin") or ""
+    if origin.startswith(("http://", "https://")) and _origin_host(origin) != _effective_host(request):
+        raise HTTPException(status_code=403, detail="cross-site request rejected")
 
 
 @app.middleware("http")
@@ -190,7 +242,7 @@ def get_pins_for_sync():
 
 
 @app.post("/api/pins")
-async def add_pin(request: AddPinRequest):
+async def add_pin(request: AddPinRequest, _: None = Depends(require_csrf)):
     """
     Add a new pin to the archive.
     
@@ -320,7 +372,7 @@ class CheckPinsRequest(BaseModel):
 
 
 @app.post("/api/pins/check")
-def check_pins_exist(request: CheckPinsRequest):
+def check_pins_exist(request: CheckPinsRequest, _: None = Depends(require_csrf)):
     """
     Check which pins from a list already exist in the archive.
     Checks both pin_id and file_id - if either matches, pin is considered existing.
@@ -353,7 +405,11 @@ def check_pins_exist(request: CheckPinsRequest):
 
 
 @app.delete("/api/pins/{pin_id}")
-def delete_pin(pin_id: str, delete_file: bool = Query(False, description="Also delete the image file")):
+def delete_pin(
+    pin_id: str,
+    delete_file: bool = Query(False, description="Also delete the image file"),
+    _: None = Depends(require_csrf)
+):
     """
     Delete a pin from the archive.
     
