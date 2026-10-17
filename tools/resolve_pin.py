@@ -34,7 +34,9 @@ FIXTURE_PATH = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "
 def main() -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
-    parser.add_argument("link", help="pin link: a full URL or a pin.it short link")
+    parser.add_argument(
+        "link", help="pin link: a full URL or a pin.it short link, on its own or inside text"
+    )
     parser.add_argument(
         "--save-fixture",
         action="store_true",

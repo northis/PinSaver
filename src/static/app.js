@@ -584,7 +584,7 @@ document.querySelectorAll('.sort-btn').forEach(btn => {
 
 // Save a pin by pasting its link: the same resolver the phone's share sheet uses
 const SAVE_LINK_MESSAGES = {
-    not_a_pin_link: 'Not a pin link — paste something like https://www.pinterest.com/pin/<id>/.',
+    not_a_pin_link: 'Not a pin link — paste something like https://www.pinterest.com/pin/<id>/ or https://pin.it/AbCdEf.',
     pin_not_found: 'Pinterest does not serve this pin anymore.',
     pinterest_unavailable: 'Pinterest is not answering — try again in a minute.',
     image_unavailable: 'Pinterest did not return an image for this pin.'

@@ -31,6 +31,10 @@ RETRY_DELAY_SECONDS = 2.0
 PIN_HOST_RE = re.compile(r"^(?:[a-z0-9-]+\.)*pinterest\.[a-z.]{2,}$", re.I)
 SHORT_LINK_HOST_RE = re.compile(r"^(?:[a-z0-9-]+\.)*pin\.it$", re.I)
 PIN_PATH_RE = re.compile(r"/pin/(\d+)")
+#: A single word that is a link on its own: `pinterest.com/pin/1/`, `pin.it/AbCdEf`.
+HOST_LIKE_RE = re.compile(r"^(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/?#]|$)", re.I)
+#: Characters that end a sentence, or wrap a link, rather than belong to it.
+LINK_TRIM_CHARS = ".,;:!?()[]{}<>\"'»…"
 META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.I)
 LINK_TAG_RE = re.compile(r"<link\b[^>]*>", re.I)
 ATTRIBUTE_RE = re.compile(r'([A-Za-z:-]+)="([^"]*)"')
@@ -154,12 +158,59 @@ def normalize_link(link: str) -> str:
     return candidate
 
 
+def link_host(link: str) -> str:
+    """
+    Lower-cased host of a link, or an empty string when the text is not a link.
+
+    `urlsplit` only sees a hostname once there is a scheme (`pin.it/AbCdEf` has none without
+    one) and raises on a malformed bracket, which is exactly what a stray word may look like.
+    """
+    candidate = (link or "").strip()
+    if not candidate:
+        return ""
+
+    try:
+        parts = urlsplit(normalize_link(candidate))
+    except ValueError:
+        return ""
+    return (parts.hostname or "").lower()
+
+
+def is_pinterest_host(host: str) -> bool:
+    """True for `pinterest.com`, its subdomains and `pin.it`."""
+    return bool(PIN_HOST_RE.match(host) or SHORT_LINK_HOST_RE.match(host))
+
+
+def first_link(text: str) -> str | None:
+    """
+    The link inside a longer text, or None when the text holds none.
+
+    The share sheet hands the pin's title over glued to the link - `"https://pin.it/AbCdEf
+    Cabelo bonito"` - and a pasted caption arrives the same way, so the text is read word by
+    word. A Pinterest link wins over any other: a caption may carry a stranger's link too.
+    """
+    found: list[tuple[str, str]] = []
+    for word in (text or "").split():
+        candidate = word.strip(LINK_TRIM_CHARS)
+        if not candidate.startswith(("http://", "https://")) and not HOST_LIKE_RE.match(candidate):
+            continue
+        host = link_host(candidate)
+        if host:
+            found.append((candidate, host))
+
+    for candidate, host in found:
+        if is_pinterest_host(host):
+            return candidate
+    return found[0][0] if found else None
+
+
 def extract_pin_id(link: str, client: httpx.Client | None = None) -> str:
     """
     Pull the numeric pin id out of a link, following `pin.it` short links.
 
     Args:
-        link: anything the share sheet or the user pasted.
+        link: anything the share sheet or the user pasted - the link itself, or the link with
+            the pin's title glued to it.
         client: optional client (tests inject one with a mock transport).
 
     Returns:
@@ -169,7 +220,11 @@ def extract_pin_id(link: str, client: httpx.Client | None = None) -> str:
         PinLookupError: reason `not_a_pin_link`, or `pinterest_unavailable` when a short
             link cannot be followed.
     """
-    candidate = normalize_link(link)
+    candidate = first_link(link)
+    if candidate is None:
+        raise PinLookupError("not_a_pin_link", f"no link in {link[:120]!r}")
+    candidate = normalize_link(candidate)
+
     own_client = None
 
     try:
@@ -202,12 +257,16 @@ def get(client: httpx.Client, url: str) -> httpx.Response:
     GET with a single retry on 429 and 5xx.
 
     Raises:
-        PinLookupError: reason `pinterest_unavailable` when the request keeps failing.
+        PinLookupError: reason `pinterest_unavailable` when the request keeps failing, or
+            `not_a_pin_link` when the URL cannot be a request at all (a control character in
+            a pasted link, say - `httpx.InvalidURL` is not an `HTTPError`).
     """
     detail = ""
     for attempt in (1, 2):
         try:
             response = client.get(url)
+        except httpx.InvalidURL as error:
+            raise PinLookupError("not_a_pin_link", f"unusable URL: {error}") from error
         except httpx.HTTPError as error:
             detail = str(error)
         else:

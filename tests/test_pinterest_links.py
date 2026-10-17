@@ -1,9 +1,9 @@
 """
 `extract_pin_id` must understand every shape a link arrives in, and refuse the rest.
 
-The share sheet sends whatever Pinterest gives it (often a `pin.it` short link), a person
-pasting a link may leave the scheme out, and a board or profile link must never be mistaken
-for a pin.
+The share sheet sends whatever Pinterest gives it (often a `pin.it` short link) with the pin's
+title next to it, a person pasting a link may leave the scheme out, and a board or profile link
+must never be mistaken for a pin.
 """
 from __future__ import annotations
 
@@ -24,6 +24,13 @@ PIN_LINKS = [
     f"www.pinterest.com/pin/{PIN_ID}/",
     f"pinterest.com/pin/{PIN_ID}/",
     f"  https://www.pinterest.com/pin/{PIN_ID}/  ",
+    # What the share sheet really produces: the pin's title, glued to the link.
+    f"https://www.pinterest.com/pin/{PIN_ID}/ Cabelo bonito",
+    f"Cabelo bonito https://www.pinterest.com/pin/{PIN_ID}/",
+    f"Cabelo bonito\nhttps://www.pinterest.com/pin/{PIN_ID}/\n",
+    f"<https://www.pinterest.com/pin/{PIN_ID}/>",
+    f"https://www.pinterest.com/pin/{PIN_ID}/.",
+    f"Look at https://example.com/cat and https://www.pinterest.com/pin/{PIN_ID}/",
 ]
 
 NOT_PIN_LINKS = [
@@ -36,6 +43,8 @@ NOT_PIN_LINKS = [
     "https://example.com/pin/1234567890/",
     "https://www.pinterest.com/pin/not-a-number/",
     "just some text from a description",
+    "see https://example.com/pin/1234567890/ for the original",
+    "https://www.pinterest.com/ and https://example.com/pin/1234567890/",
 ]
 
 
@@ -64,6 +73,51 @@ def test_short_link_is_followed() -> None:
     client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
 
     assert pinterest.extract_pin_id("https://pin.it/AbCdEf", client=client) == PIN_ID
+
+
+def test_short_link_with_the_pin_title_glued_to_it_is_followed() -> None:
+    """The title must never reach the shortener: only the link is requested."""
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.host == "pin.it":
+            return httpx.Response(
+                302, headers={"location": f"https://www.pinterest.com/pin/{PIN_ID}/"}
+            )
+        return httpx.Response(200, text="<html></html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+    assert pinterest.extract_pin_id("https://pin.it/AbCdEf Cabelo bonito", client=client) == PIN_ID
+    assert pinterest.extract_pin_id("Cabelo bonito https://pin.it/AbCdEf", client=client) == PIN_ID
+    # Two lookups, each of them a short link and its redirect - never a title in the path.
+    assert requested == [
+        "https://pin.it/AbCdEf",
+        f"https://www.pinterest.com/pin/{PIN_ID}/",
+        "https://pin.it/AbCdEf",
+        f"https://www.pinterest.com/pin/{PIN_ID}/",
+    ]
+
+
+def test_first_link_reads_the_link_out_of_the_text() -> None:
+    link = f"https://www.pinterest.com/pin/{PIN_ID}/"
+
+    assert pinterest.first_link(f"Cabelo bonito {link}") == link
+    assert pinterest.first_link(f"{link} Cabelo bonito") == link
+    assert pinterest.first_link(f"(https://example.com/cat) {link}") == link
+    assert pinterest.first_link("just some text from a description") is None
+    assert pinterest.first_link("") is None
+
+
+def test_a_link_with_a_control_character_is_refused() -> None:
+    """`httpx.InvalidURL` is not an `HTTPError`: it has to come back as a bad link, not a 500."""
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+
+    with pytest.raises(pinterest.PinLookupError) as error:
+        pinterest.extract_pin_id("https://pin.it/Ab\x00CdEf", client=client)
+
+    assert error.value.reason == "not_a_pin_link"
 
 
 def test_short_link_to_somewhere_else_is_refused() -> None:

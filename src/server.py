@@ -280,8 +280,21 @@ def add_pin(request: AddPinRequest, _: None = Depends(require_csrf)):
 
 
 class ResolvePinRequest(BaseModel):
-    """Request model for saving a pin by its link."""
+    """
+    Request model for saving a pin by its link.
+
+    The share target sends all three of its fields at once, and Pinterest fills whichever of
+    them it likes with the link and the pin's title; the site's own "Save link" field only
+    fills `url`.
+    """
+
     url: str
+    text: Optional[str] = None
+    title: Optional[str] = None
+
+    def shared_text(self) -> str:
+        """Everything the client sent, `url` first: a real link field beats a caption."""
+        return " ".join(part for part in (self.url, self.text, self.title) if part)
 
 
 #: HTTP status for every way a link can fail to resolve.
@@ -302,16 +315,18 @@ def resolve_pin_by_link(request: ResolvePinRequest, _: None = Depends(require_cs
     image and add it through the shared code path.
 
     Args:
-        request: ResolvePinRequest with the link the user pasted or shared.
+        request: ResolvePinRequest with the link the user pasted or shared; it may sit in any
+            of the three share fields, next to the pin's title.
 
     Returns:
         Dictionary with status, pin_id, file_id, size and message.
     """
+    shared = request.shared_text()
     try:
-        pin_id = extract_pin_id(request.url)
+        pin_id = extract_pin_id(shared)
         pin = resolve_pin(pin_id)
     except PinLookupError as error:
-        print(f"resolve: {error.reason} ({error.detail}) for {request.url[:200]!r}", flush=True)
+        print(f"resolve: {error.reason} ({error.detail}) for {shared[:200]!r}", flush=True)
         raise HTTPException(status_code=LOOKUP_STATUS[error.reason], detail=error.reason)
 
     conn = get_db_connection()
@@ -497,7 +512,8 @@ def version():
 SHARE_STATES = {
     "not_a_pin_link": (
         "Not a pin link",
-        "Share a link to a pin, for example https://www.pinterest.com/pin/<id>/."
+        "Share a pin link, long or short: https://www.pinterest.com/pin/<id>/ or "
+        "https://pin.it/AbCdEf."
     ),
     "pin_not_found": ("Pin not found", "Pinterest does not serve this pin anymore."),
     "pinterest_unavailable": ("Pinterest is not answering", "Try again in a minute."),

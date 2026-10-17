@@ -23,19 +23,23 @@ self.addEventListener("fetch", (event) => {
 
 /* Read the shared link out of the multipart body and ask the server to save it. */
 async function handleShare(request) {
-    let link = "";
+    /* The three fields travel as they are, never glued together: Pinterest puts the link into
+       `text` and the pin's title into `title`, so only the server can tell which part is the
+       link - and a title glued to a short link used to break the lookup. */
+    const payload = {};
     try {
         const form = await request.formData();
-        link = ["url", "text", "title"]
-            .map((name) => form.get(name))
-            .filter((value) => typeof value === "string")
-            .join(" ")
-            .trim();
+        for (const name of ["url", "text", "title"]) {
+            const value = form.get(name);
+            payload[name] = typeof value === "string" ? value.trim() : "";
+        }
     } catch (error) {
         return Response.redirect(`${RESULT_URL}?error=empty`, 303);
     }
 
-    if (!link) return Response.redirect(`${RESULT_URL}?error=empty`, 303);
+    if (!payload.url && !payload.text && !payload.title) {
+        return Response.redirect(`${RESULT_URL}?error=empty`, 303);
+    }
 
     let response;
     try {
@@ -45,7 +49,7 @@ async function handleShare(request) {
                 "Content-Type": "application/json",
                 [REQUEST_HEADER]: "1"
             },
-            body: JSON.stringify({ url: link })
+            body: JSON.stringify(payload)
         });
     } catch (error) {
         return serverIsDown();

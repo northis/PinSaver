@@ -97,6 +97,15 @@ def test_service_worker_intercepts_only_the_share_post() -> None:
     assert "url.pathname !== RESULT_URL" in source
 
 
+def test_service_worker_sends_the_share_fields_apart() -> None:
+    """The three share fields travel as they are: gluing them into one URL broke `pin.it`."""
+    source = SERVICE_WORKER.read_text(encoding="utf-8")
+
+    assert 'for (const name of ["url", "text", "title"])' in source
+    assert "JSON.stringify(payload)" in source
+    assert "JSON.stringify({ url:" not in source
+
+
 def test_service_worker_calls_the_guarded_api_and_caches_nothing() -> None:
     source = SERVICE_WORKER.read_text(encoding="utf-8")
 

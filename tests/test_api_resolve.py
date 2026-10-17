@@ -84,6 +84,41 @@ def test_saving_the_same_link_twice_only_raises_the_rating(
     assert (rating, rows) == (1, 1)
 
 
+def test_the_link_is_found_among_the_share_fields(client: TestClient, resolved: None) -> None:
+    """Android sends the link in `text` and the pin's title in `title`: neither is a link alone."""
+    response = client.post(
+        "/api/pins/resolve",
+        json={"url": "", "text": LINK, "title": "Cabelo bonito"},
+        headers=HEADER,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["pin_id"] == PIN_ID
+
+
+def test_the_glued_payload_of_an_older_worker_is_understood(
+    client: TestClient, resolved: None
+) -> None:
+    """An install that has not picked up the new worker sends link and title in one `url`."""
+    response = client.post(
+        "/api/pins/resolve", json={"url": f"{LINK} Cabelo bonito"}, headers=HEADER
+    )
+
+    assert response.status_code == 200
+    assert response.json()["pin_id"] == PIN_ID
+
+
+def test_the_url_field_beats_a_link_in_the_text(client: TestClient, resolved: None) -> None:
+    response = client.post(
+        "/api/pins/resolve",
+        json={"url": LINK, "text": "https://www.pinterest.com/pin/1234567890/", "title": ""},
+        headers=HEADER,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["pin_id"] == PIN_ID
+
+
 def test_not_a_pin_link_is_a_400(client: TestClient) -> None:
     response = client.post(
         "/api/pins/resolve", json={"url": "https://example.com/holiday-photo"}, headers=HEADER
