@@ -40,10 +40,19 @@ Chrome, которое сохраняет пины прямо со страни�
 ```bash
 git clone https://github.com/northis/PinSaver.git
 cd PinSaver
-python -m pip install -r src/requirements.txt
+python -m pip install -r src/requirements.txt -r src/requirements-tools.txt
 ```
 
-Нужен Python 3.10+.
+Нужен Python 3.10+. `requirements.txt` — то, что нужно серверу (его же ставит контейнер),
+`requirements-tools.txt` — хостовые скрипты и инструменты: `updateDelete.py` требует Playwright с
+браузером, `importer.py` — BeautifulSoup, `tools/` — Pillow.
+
+Тесты идут офлайн и не трогают архив:
+
+```bash
+python -m pip install -r src/requirements-dev.txt
+python -m pytest -q
+```
 
 ### 2. Настроить окружение
 

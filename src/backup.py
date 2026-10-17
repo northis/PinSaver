@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from models import get_db_path
+from models import get_base_path, get_db_path, get_originals_path
 
 
 @dataclass(frozen=True)
@@ -30,10 +30,10 @@ class BackupPaths:
 
 
 def get_paths() -> BackupPaths:
-    """Build and return backup paths based on repository structure."""
+    """Build and return backup paths based on the archive data directory."""
 
-    base_path = Path(__file__).parent.parent
-    originals_path = base_path / "originals"
+    base_path = get_base_path()
+    originals_path = get_originals_path()
     db_path = get_db_path()
     output_dir = base_path / "backups"
     state_path = output_dir / "backup_state.json"

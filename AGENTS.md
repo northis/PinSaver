@@ -17,7 +17,8 @@ marks already-archived pins in favorites and pushes the archive back to Pinteres
 ## Commands
 
 ```bash
-python -m pip install -r src/requirements.txt   # dependencies
+python -m pip install -r src/requirements.txt -r src/requirements-tools.txt   # server + host tools
+python -m pip install -r src/requirements-dev.txt                             # pytest
 python src/models.py                            # create the database and originals/
 python src/server.py                            # site on HOST:PORT from .env (default 0.0.0.0:8000)
 python src/backup.py                            # incremental backup into backups/
@@ -27,10 +28,14 @@ python src/migrate_duplicates.py                # merge duplicates by file_id
 python tools/bump_version.py X.Y.Z              # bump the version everywhere
 python tools/bump_version.py --check            # verify every copy of the version matches
 python tools/make_extension_icons.py            # regenerate extension PNGs from extension/icon.svg
+python -m pytest -q                             # the offline test suite
 ```
 
-There is no test suite and no CI: verify changes by running the server and looking at the site, and by
-`node --check` on the JS files.
+`requirements.txt` is the runtime (the container installs exactly that); `requirements-tools.txt` adds
+what only the host scripts and `tools/` need, so the image never pulls Playwright.
+
+Tests are offline — no Docker, no network, no real archive: `PINSAVER_DATA_DIR` points every path at a
+temporary directory. There is no CI, so also run `node --check` on the JS files you touch.
 
 ## Versioning
 

@@ -1,8 +1,6 @@
-beautifulsoup4==4.12.3
-lxml==6.0.2
+# Runtime dependencies: what the server needs, and therefore what the container installs.
+# Host-side scripts and tools also need src/requirements-tools.txt.
 fastapi==0.128.0
 uvicorn==0.40.0
 httpx==0.28.1
-Pillow==12.1.0
 dotenv==0.9.9
-playwright==1.40.0
