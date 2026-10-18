@@ -9,7 +9,7 @@ marks already-archived pins in favorites and pushes the archive back to Pinteres
 | Path | What is there |
 | --- | --- |
 | `src/` | FastAPI server and hand-run scripts (`server.py`, `models.py`, `archive.py`, `pinterest.py`, `importer.py`, `updateDelete.py`, `backup.py`, `buildinfo.py`) |
-| `src/static/` | web UI served as-is, no build step (HTML/CSS/JS, PWA manifest, icons, service worker) |
+| `src/static/` | web UI served as-is, no build step (HTML/CSS/JS, PWA manifest, icons, service worker, maintenance page `admin.*`) |
 | `extension/` | Chrome MV3 extension (content script, service worker, options page, icons) |
 | `tools/` | scripts run by hand whose output is committed (`make_extension_icons.py`, `make_pwa_icons.py`, `bump_version.py`) |
 | `tests/` | offline pytest suite (`PINSAVER_DATA_DIR` points it at a temporary directory) |
@@ -72,6 +72,12 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
 - The site runs in a container **on the owner's PC**, next to the archive; sitehub (Traefik on the
   Ubuntu host) reaches it over the SoftEther VPN at `${PINSAVER_BIND_ADDR}` (default `10.77.77.21`),
   and Cloudflare Access is the only gate in front of it. Nothing inside the app authenticates.
+- The maintenance page is a **second listener of the same process** (`PINSAVER_ADMIN_HOST` /
+  `PINSAVER_ADMIN_PORT`, default `127.0.0.1:8001`; `0` disables it, and it must differ from `PORT`).
+  It reads the database and hands out the whole archive, so every admin route takes
+  `Depends(require_local)`: the guard compares the port of the socket that accepted the request
+  (`scope["server"]`) — never a header — and answers 404 everywhere else. It is published on local
+  addresses only (`PINSAVER_ADMIN_BIND_ADDR`, default `127.0.0.1`), never on the site's VPN address.
 - **Exactly three paths are public** — `/manifest.webmanifest`, `/static/favicon.svg` and
   `/static/icons/*` — in two independent layers: a Bypass policy in Cloudflare Access and the
   `pinsaver-pwa` router in sitehub (`deploy/sitehub/pinsaver.yml`). Google's WebAPK builder fetches
@@ -83,7 +89,8 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
   context, or from the `PINSAVER_COMMIT` build arg that `update.ps1` passes.
 - Mutating endpoints require `X-PinSaver-Request: 1` and reject foreign `http(s)` origins. Any new
   mutating route must take `Depends(require_csrf)`, and every client must send the header
-  (`background.js` for the extension, `app.js` for the site, the service worker for the share flow).
+  (`background.js` for the extension, `app.js` for the site, `admin.js` for the maintenance page,
+  the service worker for the share flow).
 - `GET /share` renders from the URL parameters only and must never read the database or write:
   anyone can open it with any parameters. Saving happens in `POST /api/pins/resolve`.
 - `src/static/sw.js` intercepts exactly one request (`POST /share`) and caches nothing; it is served

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PinSaver — maintenance</title>
+    <link rel="stylesheet" href="/static/admin.css">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <meta name="theme-color" content="#e60023">
+</head>
+<body>
+    <header>
+        <div class="header-title">
+            <h1>📌 PinSaver — maintenance</h1>
+            <div class="build-badge" id="buildBadge" hidden>
+                <a id="buildVersion" target="_blank" rel="noopener noreferrer"></a>
+                <span class="sep" id="buildCommitSep" hidden>·</span>
+                <a id="buildCommit" target="_blank" rel="noopener noreferrer" hidden></a>
+            </div>
+        </div>
+        <a class="site-link" href="/">Open the site ↗</a>
+    </header>
+
+    <main id="admin">
+        <p class="notice" id="portNotice" hidden></p>
+
+        <section class="panel">
+            <h2>Archive</h2>
+            <div class="stats" id="stats">Loading…</div>
+            <div class="paths" id="paths"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Full backup</h2>
+            <p class="hint">
+                The database and every image in one zip. It is built while it downloads:
+                nothing is written to the server's disk, so this works at any archive size.
+            </p>
+            <p>
+                <a class="btn" id="fullBackup" href="/api/admin/backup/full">Download full backup</a>
+                <span class="status" id="fullStatus"></span>
+            </p>
+        </section>
+
+        <section class="panel">
+            <h2>Incremental backup</h2>
+            <p class="hint">
+                A zip in <code>backups/</code>: the database plus only the images that changed
+                since the last backup. The same as <code>python src/backup.py</code>.
+            </p>
+            <p>
+                <button class="btn" id="runBackup">Create backup</button>
+                <span class="status" id="backupStatus"></span>
+            </p>
+            <p class="hint" id="lastBackup"></p>
+        </section>
+
+        <section class="panel">
+            <h2>Backups on disk</h2>
+            <div class="table-wrap" id="backupList">Loading…</div>
+        </section>
+    </main>
+
+    <script src="/static/admin.js"></script>
+</body>
+</html>

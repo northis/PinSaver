@@ -21,13 +21,18 @@ services:
       # Traefik on the sitehub host reaches the site over the SoftEther VPN. Never publish
       # this address to the internet directly: the site is closed by Cloudflare Access.
       - "${PINSAVER_BIND_ADDR:-10.77.77.21}:${PINSAVER_PORT:-8000}:8000"
-      # Maintenance page (later release): local addresses only, so the database can be
-      # downloaded from the local network.
-      # - "${PINSAVER_ADMIN_BIND_ADDR:-10.77.77.21}:${PINSAVER_ADMIN_PORT:-8001}:8001"
+      # Maintenance page: published on local addresses only, because it hands out the whole
+      # archive (database + images) without a password of its own. Never move it to a public
+      # address: 127.0.0.1 is this machine, PINSAVER_ADMIN_BIND_ADDR may be the VPN address.
+      - "${PINSAVER_ADMIN_BIND_ADDR:-127.0.0.1}:${PINSAVER_ADMIN_PORT:-8001}:8001"
     environment:
       # listen on all interfaces so the published ports work
       HOST: 0.0.0.0
       PORT: 8000
+      # the maintenance listener is a second port of the same process; the published
+      # address above, not this one, decides who can reach it
+      PINSAVER_ADMIN_HOST: 0.0.0.0
+      PINSAVER_ADMIN_PORT: 8001
       # inside the container the archive is always at /data (the mount below)
       PINSAVER_DATA_DIR: /data
       PINSAVER_REPO_URL: "${PINSAVER_REPO_URL:-}"

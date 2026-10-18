@@ -4,6 +4,8 @@ FastAPI server for Pinterest archive viewer.
 import os
 import re
 import sqlite3
+import threading
+from collections.abc import Iterator
 from html import escape
 from pathlib import Path
 from typing import Mapping, Optional
@@ -11,10 +13,11 @@ from typing import Mapping, Optional
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import backup
 from archive import AddPinError, add_pin_from_url
 from buildinfo import build_info
 from models import get_db_path, get_originals_path
@@ -24,6 +27,13 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
+#: The maintenance page listens on its own socket, which is published on local addresses
+#: only (see README). 0 disables it; it must differ from PORT, otherwise the admin routes
+#: would answer on the public listener.
+ADMIN_HOST = os.getenv("PINSAVER_ADMIN_HOST", "127.0.0.1")
+ADMIN_PORT = int(os.getenv("PINSAVER_ADMIN_PORT", "8001"))
+if ADMIN_PORT == PORT:
+    ADMIN_PORT = 0
 
 app = FastAPI(title="Pinterest Archive Viewer")
 
@@ -97,6 +107,31 @@ def require_csrf(request: Request) -> None:
     origin = request.headers.get("origin") or ""
     if origin.startswith(("http://", "https://")) and _origin_host(origin) != _effective_host(request):
         raise HTTPException(status_code=403, detail="cross-site request rejected")
+
+
+def is_local_admin(request: Request) -> bool:
+    """
+    Check whether the request arrived on the admin listener.
+
+    The port comes from the socket that accepted the connection (`scope["server"]`), never
+    from a header: `Host` and `X-Forwarded-*` are the client's to write. A request to the
+    site's own port therefore never counts as admin, whatever it claims.
+    """
+    if not ADMIN_PORT:
+        return False
+    server = request.scope.get("server") or ()
+    return len(server) == 2 and server[1] == ADMIN_PORT
+
+
+def require_local(request: Request) -> None:
+    """
+    Guard every admin route: off the admin listener they do not exist (404, not 403).
+
+    The maintenance page can read the database and hand out the whole archive, so it is
+    published on local addresses only and answers nowhere else.
+    """
+    if not is_local_admin(request):
+        raise HTTPException(status_code=404, detail="Not Found")
 
 
 @app.middleware("http")
@@ -606,14 +641,189 @@ def service_worker() -> FileResponse:
 @app.get("/", response_class=HTMLResponse)
 def index():
     """Serve the main HTML page with cache-busted static asset URLs."""
-    html = (STATIC_PATH / "index.html").read_text(encoding="utf-8")
-    html = VERSIONED_ASSET_RE.sub(
+    return HTMLResponse(render_static_page("index.html"), headers={"Cache-Control": "no-cache"})
+
+
+def render_static_page(name: str) -> str:
+    """Read a page from static/ and version the CSS and JS links it pulls in."""
+    html = (STATIC_PATH / name).read_text(encoding="utf-8")
+    return VERSIONED_ASSET_RE.sub(
         lambda match: f"{match.group(1)}{match.group(2)}?v={build_info()['version']}{match.group(1)}",
         html
     )
-    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+# --------------------------------------------------------------------------- maintenance
+# The maintenance page: reachable on the admin listener only (see require_local), so it can
+# hand out the archive without an account of its own. Every route below takes that guard;
+# the mutating one takes require_csrf as well, like every other mutating route.
+
+#: Backups are served by bare file name only: a separator (on Windows `\` counts, and `%5c`
+#: reaches the handler as an ordinary character) would read files outside backups/.
+BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$")
+
+#: Only one incremental backup at a time: each one reads the database and every image that
+#: changed, and two at once would put the same images into two archives and race on the
+#: state file that says what the next backup should contain.
+BACKUP_LOCK = threading.Lock()
+
+
+@app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(require_local)])
+def admin_page():
+    """The maintenance page: archive totals, backups, download links."""
+    return HTMLResponse(render_static_page("admin.html"), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/admin/state", dependencies=[Depends(require_local)])
+def admin_state():
+    """
+    What the maintenance page shows on load: archive totals and backup state.
+
+    Sizes are read from disk on every call, so the page never shows a stale estimate.
+    """
+    paths = backup.get_paths()
+
+    # A fresh install has no database yet: the page then shows zeroes instead of an error.
+    total = deleted = 0
+    if paths.db_path.exists():
+        conn = get_db_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total, COALESCE(SUM(is_deleted), 0) AS deleted FROM pins"
+            ).fetchone()
+            total, deleted = row["total"], row["deleted"]
+        finally:
+            conn.close()
+
+    originals = backup.originals_stats(paths.originals_path)
+    backups = backup.list_backups(paths)
+
+    return {
+        "admin_port": ADMIN_PORT,
+        "database": {
+            "path": str(paths.db_path),
+            "bytes": paths.db_path.stat().st_size if paths.db_path.exists() else 0,
+        },
+        "originals": {
+            "path": str(paths.originals_path),
+            "files": originals["files"],
+            "bytes": originals["bytes"],
+        },
+        "pins": {
+            "total": total,
+            "active": total - deleted,
+            "deleted": deleted,
+        },
+        "backups": {
+            "path": str(paths.output_dir),
+            "count": len(backups),
+            "bytes": sum(item["bytes"] for item in backups),
+            "last_backup_utc": backup.last_backup_utc(paths),
+        },
+    }
+
+
+@app.get("/api/admin/backups", dependencies=[Depends(require_local)])
+def admin_backups():
+    """Every backup zip in backups/, newest first."""
+    return {"backups": backup.list_backups()}
+
+
+@app.get("/api/admin/backups/{name}", dependencies=[Depends(require_local)])
+def admin_download_backup(name: str):
+    """
+    Download one stored backup.
+
+    Args:
+        name: File name of a zip inside backups/, without any path.
+    """
+    output_dir = backup.get_paths().output_dir.resolve()
+    file_path = (output_dir / name).resolve()
+
+    if not BACKUP_NAME_RE.match(name) or not file_path.is_relative_to(output_dir):
+        raise HTTPException(status_code=404, detail="backup not found")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="backup not found")
+
+    return FileResponse(file_path, media_type="application/zip", filename=name)
+
+
+@app.get("/api/admin/backup/full", dependencies=[Depends(require_local)])
+def admin_full_backup() -> StreamingResponse:
+    """
+    Download the whole archive: a database snapshot plus every original image.
+
+    Built on the fly and streamed, so it needs no disk space and no waiting: the browser
+    starts saving as soon as the first bytes are ready, however large the archive is.
+    """
+    filename = backup.build_full_backup_name(backup.utc_now())
+    return StreamingResponse(
+        backup.iter_full_backup_zip(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        }
+    )
+
+
+@app.post("/api/admin/backup", dependencies=[Depends(require_local)])
+def admin_run_backup(_: None = Depends(require_csrf)):
+    """
+    Run the incremental backup (the same work as `python src/backup.py`).
+
+    Returns:
+        Dictionary describing the archive just written: name, size, creation time, how many
+        images it contains and when the previous backup was taken.
+    """
+    if not BACKUP_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a backup is already running")
+
+    try:
+        result = backup.run_backup()
+    finally:
+        BACKUP_LOCK.release()
+
+    return {"status": "created", "backup": result}
+
+
+def _bind(host: str, port: int):
+    """Bind a listening socket ourselves, so one uvicorn server can serve both ports."""
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.listen(128)
+    return sock
+
+
+def run_servers() -> None:
+    """
+    Serve the site and, when it is enabled, the maintenance page on a second socket.
+
+    One process, one app, one lifespan: the admin listener does not duplicate any state, it
+    only marks the requests that arrive on it as local (`is_local_admin`).
+    """
+    import uvicorn
+
+    sockets = [_bind(HOST, PORT)]
+    if ADMIN_PORT and ADMIN_PORT != PORT:
+        sockets.append(_bind(ADMIN_HOST, ADMIN_PORT))
+
+    bound = [sock.getsockname()[:2] for sock in sockets]
+    message = f"PinSaver: http://{bound[0][0]}:{bound[0][1]}"
+    if len(bound) > 1:
+        message += f" (maintenance: http://{bound[1][0]}:{bound[1][1]})"
+    print(message, flush=True)
+
+    try:
+        uvicorn.Server(uvicorn.Config(app)).run(sockets=sockets)
+    finally:
+        for sock in sockets:
+            sock.close()
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host=HOST, port=PORT)
+    run_servers()

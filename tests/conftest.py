@@ -37,3 +37,16 @@ def client(data_dir: Path) -> TestClient:
     """TestClient whose app reads its data from the temporary directory."""
     with TestClient(server.app) as test_client:
         yield test_client
+
+
+#: Port the fake admin listener answers on: the server compares it with the port of the
+#: socket that accepted the request (`scope["server"]`), never with a header.
+ADMIN_PORT = 8001
+
+
+@pytest.fixture()
+def admin_client(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """TestClient that arrives on the admin listener, like the maintenance page does."""
+    monkeypatch.setattr(server, "ADMIN_PORT", ADMIN_PORT)
+    with TestClient(server.app, base_url=f"http://127.0.0.1:{ADMIN_PORT}") as test_client:
+        yield test_client

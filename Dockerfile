@@ -7,6 +7,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HOST=0.0.0.0 \
     PORT=8000 \
+    PINSAVER_ADMIN_HOST=0.0.0.0 \
+    PINSAVER_ADMIN_PORT=8001 \
     PINSAVER_DATA_DIR=/data
 
 WORKDIR /app
@@ -36,7 +38,7 @@ LABEL org.opencontainers.image.source="https://github.com/northis/PinSaver" \
 # Mount point used by docker-compose.yml: the archive lives on the host.
 RUN mkdir -p /data
 
-# 8000 - site. 8001 is reserved for the maintenance page (local addresses only, later).
+# 8000 - site. 8001 - maintenance page (the admin listener; published on local addresses only).
 EXPOSE 8000 8001
 
 # Liveness probe (GET /api/version): every 5 minutes, it is only for docker ps status.
