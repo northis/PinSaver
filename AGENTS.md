@@ -101,7 +101,11 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
   URLs are cache-busted with `?v=<version>` by the `/` route in `server.py`.
 - New API routes go into `src/server.py` with a docstring, and the README API table gets a row.
 - The extension talks to the server only through `background.js` (`API_REQUEST` messages) to bypass
-  Chrome Private Network Access; `server.py` answers Pinterest origins with CORS/PNA headers.
+  Chrome Private Network Access; `server.py` answers Pinterest origins with CORS/PNA headers. A
+  message carries only `path` and fetch `options`: `content.js` never knows the server address,
+  while `background.js` holds `serverUrl`, matches the exact `${method} ${path}` pairs of its
+  allowlist and checks the host permission granted at runtime. The archive address is granted per
+  origin and stored nowhere in the repository; `server.py` needs no changes for it.
 - README is Russian; code, comments and docstrings are English.
 
 ## Data safety

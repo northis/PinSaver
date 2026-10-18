@@ -7,8 +7,6 @@
 (function() {
     'use strict';
 
-    const DEFAULT_SERVER_URL = 'http://localhost:8000';
-    let serverUrl = DEFAULT_SERVER_URL;
     let archivedPinIds = new Set();
     let pendingPins = new Map(); // pin_id -> file_id (best known), awaiting check
     let pinFileIds = new Map(); // pin_id -> best known file_id
@@ -19,38 +17,46 @@
     let retryTimer = null;
     let retryDelay = 1000;
 
-    // Load server URL from storage. All requests await this promise so they
-    // never race with the default URL while the configured one is loading.
-    const serverUrlReady = new Promise((resolve) => {
-        chrome.storage.sync.get(['serverUrl'], (result) => {
-            if (result.serverUrl) {
-                serverUrl = result.serverUrl;
-            }
-            resolve(serverUrl);
-        });
-    });
-
     /**
-     * Make API request via background script to bypass PNA restrictions
-     * @param {string} url - API URL
+     * Make API request via background script to bypass PNA restrictions.
+     * The background script owns the server address, so only the path travels here.
+     * @param {string} path - API path, must be one of the allowlisted routes
      * @param {Object} options - Fetch options
      * @returns {Promise<Object>} Response data
      */
-    async function apiRequest(url, options = {}) {
+    async function apiRequest(path, options = {}) {
         return new Promise((resolve, reject) => {
             chrome.runtime.sendMessage(
-                { type: 'API_REQUEST', url, options },
+                { type: 'API_REQUEST', path, options },
                 (response) => {
                     if (chrome.runtime.lastError) {
                         reject(new Error(chrome.runtime.lastError.message));
                     } else if (response.success) {
                         resolve(response.data);
                     } else {
-                        reject(new Error(response.error));
+                        const error = new Error(response.error);
+                        error.code = response.code;
+                        reject(error);
                     }
                 }
             );
         });
+    }
+
+    /**
+     * Pick the notification text for a failed API request
+     * @param {Error} error - Rejection from apiRequest, may carry a `code`
+     * @param {string} fallback - Text for every other failure
+     * @returns {string} Message to show the user
+     */
+    function apiErrorMessage(error, fallback) {
+        if (error.code === 'NO_PERMISSION') {
+            return 'Access to this server is not granted — grant it in the extension settings.';
+        }
+        if (error.code === 'NOT_AUTHENTICATED') {
+            return 'Cloudflare Access needs a sign-in — open the archive in this browser first.';
+        }
+        return fallback;
     }
 
     /**
@@ -209,7 +215,7 @@
         showNotification('Saving to archive...', 'loading');
 
         try {
-            const result = await apiRequest(`${serverUrl}/api/pins`, {
+            const result = await apiRequest('/api/pins', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -228,7 +234,7 @@
 
         } catch (error) {
             console.error('Pinterest Archive Saver error:', error);
-            showNotification(`Error: ${error.message}`, 'error');
+            showNotification(apiErrorMessage(error, `Error: ${error.message}`), 'error');
         }
     }
 
@@ -379,8 +385,7 @@
         const pins = Array.from(pinsMap.entries()).map(([pin_id, file_id]) => ({ pin_id, file_id: file_id || null }));
         
         try {
-            await serverUrlReady;
-            const data = await apiRequest(`${serverUrl}/api/pins/check`, {
+            const data = await apiRequest('/api/pins/check', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pins })
@@ -514,7 +519,7 @@
         
         // Save to archive
         try {
-            const result = await apiRequest(`${serverUrl}/api/pins`, {
+            const result = await apiRequest('/api/pins', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -547,7 +552,7 @@
             icon.innerHTML = '↓';
             icon.classList.remove('pa-loading');
             icon.classList.add('pa-not-archived');
-            showNotification(`Failed to save pin ${pinId}`, 'error');
+            showNotification(apiErrorMessage(error, `Failed to save pin ${pinId}`), 'error');
         }
     }
 
@@ -724,20 +729,13 @@
         const button = document.querySelector('.pa-sync-button');
         if (!button || button.disabled) return;
 
-        // Get settings
-        const settings = await new Promise(resolve => {
-            chrome.storage.sync.get(['serverUrl'], resolve);
-        });
-
-        const serverUrlValue = settings.serverUrl || 'http://localhost:8000';
-
         button.disabled = true;
         button.innerHTML = '<span class="pa-sync-icon">⏳</span> Syncing...';
         showSyncStatus('Fetching pins from archive...');
 
         try {
             // Get all non-deleted pins from archive server via background script
-            const data = await apiRequest(`${serverUrlValue}/api/pins/sync`, {
+            const data = await apiRequest('/api/pins/sync', {
                 method: 'GET'
             });
 
@@ -757,7 +755,7 @@
             showSyncStatus(`Done: ${result.added} added, ${result.failed} failed`, 'success');
 
         } catch (error) {
-            showSyncStatus(`Error: ${error.message}`, 'error');
+            showSyncStatus(apiErrorMessage(error, `Error: ${error.message}`), 'error');
         }
 
         button.disabled = false;
@@ -767,10 +765,7 @@
     /**
      * Initialize the extension
      */
-    async function init() {
-        // Wait for the configured server URL so the first checks do not hit the default one
-        await serverUrlReady;
-        
+    function init() {
         attachToSaveButtons();
         initObserver();
         

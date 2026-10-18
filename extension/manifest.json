@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pinterest Archive Saver",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Save Pinterest pins to your local archive",
   "icons": {
     "16": "icon16.png",
@@ -25,6 +25,10 @@
     "https://*.pinterest.com/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"
