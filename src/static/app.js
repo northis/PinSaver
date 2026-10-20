@@ -55,6 +55,9 @@ function getShortestColumn() {
 // Carousel functionality (defined early for use in createPinCard)
 let carouselIndex = 0;
 let carouselLoading = false;
+let swipeStartX = 0;
+let swipeStartY = 0;
+let swipeTracking = false;
 
 function openCarousel(index) {
     carouselIndex = index;
@@ -66,6 +69,7 @@ function openCarousel(index) {
 function hideCarousel() {
     document.getElementById('carouselOverlay').classList.remove('show');
     document.body.style.overflow = '';
+    swipeTracking = false;
 }
 
 function updateCarousel() {
@@ -154,15 +158,22 @@ function createPinCard(pin, colWidth) {
     card.dataset.pinId = pin.pin_id;
     card.style.width = colWidth + 'px';
 
-    const link = document.createElement('a');
-    link.href = pin.pinterest_url;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
+    // The image opens the gallery; the pin itself is a separate link on the card
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'pin-open';
+    openBtn.title = 'View in gallery';
 
     const img = document.createElement('img');
     img.dataset.src = pin.image_url;
     img.alt = `Pin ${pin.pin_id}`;
     img.loading = 'lazy';
+
+    openBtn.appendChild(img);
+    openBtn.onclick = () => {
+        const index = allPins.findIndex(p => p.pin_id === pin.pin_id);
+        if (index > -1) openCarousel(index);
+    };
 
     const info = document.createElement('div');
     info.className = 'pin-info';
@@ -193,22 +204,18 @@ function createPinCard(pin, colWidth) {
         showDeleteModal(pin.pin_id);
     };
 
-    const viewBtn = document.createElement('button');
-    viewBtn.className = 'view-btn';
-    viewBtn.innerHTML = '⛶';
-    viewBtn.title = 'View fullscreen';
-    viewBtn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const index = allPins.findIndex(p => p.pin_id === pin.pin_id);
-        if (index > -1) openCarousel(index);
-    };
+    const pinLink = document.createElement('a');
+    pinLink.className = 'pin-link';
+    pinLink.href = pin.pinterest_url;
+    pinLink.target = '_blank';
+    pinLink.rel = 'noopener noreferrer';
+    pinLink.title = 'Open on Pinterest';
+    pinLink.innerHTML = '↗';
 
-    link.appendChild(img);
-    card.appendChild(link);
+    card.appendChild(openBtn);
     card.appendChild(ratingBadge);
     card.appendChild(deleteBtn);
-    card.appendChild(viewBtn);
+    card.appendChild(pinLink);
     card.appendChild(info);
 
     return card;
@@ -469,9 +476,63 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Close carousel on overlay click (not on image)
-document.getElementById('carouselOverlay').addEventListener('click', (e) => {
-    if (e.target.id === 'carouselOverlay' || e.target.classList.contains('carousel-container')) {
+// Swipe navigation for touch screens: a horizontal drag over the image moves to the
+// previous or next pin. The arrows are hidden there, so the image keeps the whole window.
+const SWIPE_THRESHOLD = 60;
+const SWIPE_SLOP = 12;
+
+function swipeStart(e) {
+    if (e.touches.length !== 1 || e.target.closest('button, a')) {
+        swipeTracking = false;
+        return;
+    }
+    swipeStartX = e.touches[0].clientX;
+    swipeStartY = e.touches[0].clientY;
+    swipeTracking = true;
+}
+
+function swipeMove(e) {
+    if (!swipeTracking || e.touches.length !== 1) return;
+
+    const dx = e.touches[0].clientX - swipeStartX;
+    const dy = e.touches[0].clientY - swipeStartY;
+
+    // A mostly horizontal drag belongs to the carousel, not to the browser's
+    // back/forward gesture
+    if (Math.abs(dx) > SWIPE_SLOP && Math.abs(dx) > Math.abs(dy)) {
+        e.preventDefault();
+    }
+}
+
+function swipeEnd(e) {
+    if (!swipeTracking) return;
+    swipeTracking = false;
+
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - swipeStartX;
+    const dy = touch.clientY - swipeStartY;
+
+    if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) <= Math.abs(dy)) return;
+    if (dx < 0) {
+        carouselNext();
+    } else {
+        carouselPrev();
+    }
+}
+
+const carouselOverlay = document.getElementById('carouselOverlay');
+carouselOverlay.addEventListener('touchstart', swipeStart, { passive: true });
+carouselOverlay.addEventListener('touchmove', swipeMove, { passive: false });
+carouselOverlay.addEventListener('touchend', swipeEnd);
+carouselOverlay.addEventListener('touchcancel', () => { swipeTracking = false; });
+
+// Close carousel on overlay click (not on the image)
+carouselOverlay.addEventListener('click', (e) => {
+    if (e.target.id === 'carouselOverlay' ||
+        e.target.classList.contains('carousel-container') ||
+        e.target.classList.contains('carousel-image-wrapper')) {
         hideCarousel();
     }
 });
