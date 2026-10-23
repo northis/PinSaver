@@ -435,7 +435,9 @@ header h1 {
     align-items: center;
     justify-content: center;
     position: relative;
-    touch-action: pan-y;
+    /* The gallery handles touch itself (app.js): swipe at 1x, pinch to zoom the image and
+       one finger to pan it, so the browser's own scrolling and zoom stay out of the way */
+    touch-action: none;
 }
 
 /* The image takes the whole window: the arrows are drawn on top of it, not beside it */

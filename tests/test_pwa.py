@@ -19,7 +19,13 @@ PAGES = ("index.html", "share.html")
 MANIFEST_LINK = '<link rel="manifest" href="/manifest.webmanifest">'
 FAVICON_LINK = '<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">'
 APPLE_TOUCH_LINK = '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon-180.png">'
-THEME_COLOR = '<meta name="theme-color" content="#e60023">'
+# The share page is always dark, so it names its colour instead of inheriting the red header
+# one; the manifest carries the same dark value for the installed app.
+SHARE_THEME_COLOR = "#16171b"
+THEME_META = {
+    "index.html": '<meta name="theme-color" content="#e60023">',
+    "share.html": f'<meta name="theme-color" content="{SHARE_THEME_COLOR}">',
+}
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 RGBA, RGB = 6, 2  # PNG colour types: with and without an alpha channel
 
@@ -123,7 +129,22 @@ def test_every_page_points_at_the_pwa_assets() -> None:
         assert MANIFEST_LINK in html
         assert FAVICON_LINK in html
         assert APPLE_TOUCH_LINK in html
-        assert THEME_COLOR in html
+        assert THEME_META[page] in html
+
+
+def test_the_share_page_is_always_dark() -> None:
+    """The result page opens over whatever app shared the link, so it does not follow the
+    phone's theme: its colours are declared once and the status bar is told the chrome is
+    dark, which is what makes the browser draw light status icons."""
+    html = (STATIC / "share.html").read_text(encoding="utf-8")
+
+    assert "color-scheme: dark" in html
+    assert "prefers-color-scheme" not in html
+    assert THEME_META["share.html"] in html
+
+
+def test_the_manifest_sets_the_dark_theme_color() -> None:
+    assert manifest()["theme_color"] == SHARE_THEME_COLOR
 
 
 def test_the_manifest_moved_out_of_static(client: TestClient) -> None:

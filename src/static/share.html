@@ -4,14 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PinSaver</title>
-    <meta name="theme-color" content="#e60023">
+    <!-- The page is always dark, so the status bar is told so explicitly: a dark theme-color
+         makes the browser draw light status icons, on any phone and in any phone theme. -->
+    <meta name="theme-color" content="#16171b">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon-180.png">
     <style>
-        /* Phone first: the share sheet opens this page, often one-handed. */
+        /* Phone first: the share sheet opens this page, often one-handed. The page is always
+           dark - it is a short result screen shown over whatever app shared the link - so it
+           never follows the phone's light theme and its colours are declared once here. */
         :root {
-            color-scheme: light dark;
+            color-scheme: dark;
+            background: #16171b;
         }
 
         * {
@@ -26,17 +31,16 @@
             display: grid;
             place-items: center;
             padding: 24px;
-            background: #f0f0f0;
-            color: #202020;
+            background: #16171b;
+            color: #ecebe6;
         }
 
         .card {
             width: 100%;
             max-width: 520px;
-            background: #ffffff;
+            background: #232428;
             border-radius: 16px;
             padding: 28px 24px;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
         }
 
         .mark {
@@ -52,7 +56,7 @@
         p {
             font-size: 15px;
             line-height: 1.5;
-            color: #444444;
+            color: #b9b9b3;
             word-break: break-word;
         }
 
@@ -65,22 +69,6 @@
             color: #ffffff;
             text-decoration: none;
             font-weight: 600;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            body {
-                background: #16171b;
-                color: #ecebe6;
-            }
-
-            .card {
-                background: #232428;
-                box-shadow: none;
-            }
-
-            p {
-                color: #b9b9b3;
-            }
         }
     </style>
 </head>

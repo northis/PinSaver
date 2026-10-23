@@ -70,6 +70,8 @@ function hideCarousel() {
     document.getElementById('carouselOverlay').classList.remove('show');
     document.body.style.overflow = '';
     swipeTracking = false;
+    lastTapAt = 0;
+    resetZoom();
 }
 
 function updateCarousel() {
@@ -81,6 +83,9 @@ function updateCarousel() {
     const link = document.getElementById('carouselLink');
     const prevBtn = document.getElementById('carouselPrev');
     const nextBtn = document.getElementById('carouselNext');
+
+    // The next pin starts at its own size: the zoom of the previous one must not follow it
+    resetZoom();
 
     img.classList.remove('loaded');
     img.src = pin.image_url;
@@ -476,22 +481,202 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Swipe navigation for touch screens: a horizontal drag over the image moves to the
-// previous or next pin. The arrows are hidden there, so the image keeps the whole window.
+// Touch gestures in the gallery. A horizontal drag at the normal size moves to the previous
+// or next pin (the arrows are hidden there, so the image keeps the whole window). Two
+// fingers zoom the image itself, the way a web lightbox does, and one finger pans it while
+// it is larger than the window; the swipe only navigates at 1x.
 const SWIPE_THRESHOLD = 60;
 const SWIPE_SLOP = 12;
+const ZOOM_MAX = 4;
+const ZOOM_DOUBLE_TAP = 2.5;
+const TAP_MAX_MS = 300;
+const DOUBLE_TAP_MS = 300;
 
-function swipeStart(e) {
-    if (e.touches.length !== 1 || e.target.closest('button, a')) {
-        swipeTracking = false;
+let zoomScale = 1;
+let zoomX = 0;
+let zoomY = 0;
+
+let pinchStartDistance = 0;
+let pinchStartScale = 1;
+let pinchStartX = 0;
+let pinchStartY = 0;
+let pinchStartMidX = 0;
+let pinchStartMidY = 0;
+
+let panTracking = false;
+let panStartX = 0;
+let panStartY = 0;
+let panOriginX = 0;
+let panOriginY = 0;
+
+let gestureStartAt = 0;
+let lastTapAt = 0;
+let zoomGestureAt = 0;
+
+function carouselImage() {
+    return document.getElementById('carouselImage');
+}
+
+function applyZoom() {
+    carouselImage().style.transform = zoomScale > 1
+        ? `translate(${zoomX}px, ${zoomY}px) scale(${zoomScale})`
+        : '';
+}
+
+function resetZoom() {
+    zoomScale = 1;
+    zoomX = 0;
+    zoomY = 0;
+    pinchStartDistance = 0;
+    panTracking = false;
+    applyZoom();
+}
+
+// Keep the image inside the window: while it is larger than the window it may be panned,
+// otherwise it stays centred.
+function clampZoom() {
+    const img = carouselImage();
+    const wrapper = img.parentElement;
+    const maxX = Math.max(0, (img.clientWidth * zoomScale - wrapper.clientWidth) / 2);
+    const maxY = Math.max(0, (img.clientHeight * zoomScale - wrapper.clientHeight) / 2);
+
+    zoomX = Math.min(maxX, Math.max(-maxX, zoomX));
+    zoomY = Math.min(maxY, Math.max(-maxY, zoomY));
+}
+
+// Scale around the point under the fingers (or under the double tap): the image point at
+// the offset c from the centre has to stay at c, so the translation follows the ratio.
+function zoomTo(scale, clientX, clientY) {
+    const rect = carouselImage().parentElement.getBoundingClientRect();
+    const ratio = scale / zoomScale;
+    const cx = clientX - (rect.left + rect.width / 2);
+    const cy = clientY - (rect.top + rect.height / 2);
+
+    zoomX = cx * (1 - ratio) + zoomX * ratio;
+    zoomY = cy * (1 - ratio) + zoomY * ratio;
+    zoomScale = scale;
+    clampZoom();
+    applyZoom();
+    zoomGestureAt = Date.now();
+}
+
+function touchDistance(a, b) {
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+function touchMidpoint(a, b) {
+    const rect = carouselImage().parentElement.getBoundingClientRect();
+    return {
+        x: (a.clientX + b.clientX) / 2 - (rect.left + rect.width / 2),
+        y: (a.clientY + b.clientY) / 2 - (rect.top + rect.height / 2)
+    };
+}
+
+function pinchMove(e) {
+    const distance = touchDistance(e.touches[0], e.touches[1]);
+    if (!pinchStartDistance || !distance) return;
+
+    const scale = Math.min(ZOOM_MAX, Math.max(1, pinchStartScale * distance / pinchStartDistance));
+    const mid = touchMidpoint(e.touches[0], e.touches[1]);
+    const ratio = scale / pinchStartScale;
+
+    // The point that was between the fingers stays between them, and the midpoint itself
+    // moves the image, so a two-finger drag pans it while it zooms
+    zoomX = mid.x - ratio * pinchStartMidX + ratio * pinchStartX;
+    zoomY = mid.y - ratio * pinchStartMidY + ratio * pinchStartY;
+    zoomScale = scale;
+    clampZoom();
+    applyZoom();
+    zoomGestureAt = Date.now();
+}
+
+// A double tap toggles the zoom, the way a web lightbox does; a single tap does nothing
+// (the black area around the image still closes the gallery).
+function handleTap(clientX, clientY) {
+    if (Date.now() - gestureStartAt > TAP_MAX_MS) {
+        lastTapAt = 0;
         return;
     }
+
+    if (lastTapAt && Date.now() - lastTapAt < DOUBLE_TAP_MS) {
+        lastTapAt = 0;
+        zoomTo(zoomScale > 1 ? 1 : ZOOM_DOUBLE_TAP, clientX, clientY);
+        return;
+    }
+
+    lastTapAt = Date.now();
+}
+
+function swipeStart(e) {
+    gestureStartAt = Date.now();
+    // A new touch starts a new gesture: the click it may produce belongs to it, not to the
+    // pinch or pan that ended before
+    zoomGestureAt = 0;
+
+    if (e.target.closest('button, a')) {
+        swipeTracking = false;
+        panTracking = false;
+        pinchStartDistance = 0;
+        return;
+    }
+
+    if (e.touches.length === 2) {
+        // Two fingers mean zoom, not navigation: the swipe is off, and the browser's own
+        // zoom stays out of the way because the gallery has touch-action: none
+        swipeTracking = false;
+        panTracking = false;
+        lastTapAt = 0;
+        pinchStartDistance = touchDistance(e.touches[0], e.touches[1]);
+        pinchStartScale = zoomScale;
+        pinchStartX = zoomX;
+        pinchStartY = zoomY;
+
+        const mid = touchMidpoint(e.touches[0], e.touches[1]);
+        pinchStartMidX = mid.x;
+        pinchStartMidY = mid.y;
+        return;
+    }
+
+    if (e.touches.length !== 1) {
+        swipeTracking = false;
+        panTracking = false;
+        return;
+    }
+
+    if (zoomScale > 1) {
+        // A zoomed image is panned with one finger; only a swipe at 1x changes the pin
+        panTracking = true;
+        swipeTracking = false;
+        panStartX = e.touches[0].clientX;
+        panStartY = e.touches[0].clientY;
+        panOriginX = zoomX;
+        panOriginY = zoomY;
+        return;
+    }
+
+    panTracking = false;
     swipeStartX = e.touches[0].clientX;
     swipeStartY = e.touches[0].clientY;
     swipeTracking = true;
 }
 
 function swipeMove(e) {
+    if (e.touches.length === 2 && pinchStartDistance) {
+        e.preventDefault();
+        pinchMove(e);
+        return;
+    }
+
+    if (panTracking && e.touches.length === 1) {
+        e.preventDefault();
+        zoomX = panOriginX + e.touches[0].clientX - panStartX;
+        zoomY = panOriginY + e.touches[0].clientY - panStartY;
+        clampZoom();
+        applyZoom();
+        zoomGestureAt = Date.now();
+        return;
+    }
+
     if (!swipeTracking || e.touches.length !== 1) return;
 
     const dx = e.touches[0].clientX - swipeStartX;
@@ -505,16 +690,43 @@ function swipeMove(e) {
 }
 
 function swipeEnd(e) {
+    const touch = e.changedTouches[0];
+
+    if (pinchStartDistance) {
+        // Lifting one finger ends the pinch; the one still down must not start a swipe
+        pinchStartDistance = 0;
+        swipeTracking = false;
+        panTracking = false;
+        if (zoomScale < 1.05) resetZoom();
+        return;
+    }
+
+    if (panTracking) {
+        panTracking = false;
+        if (!touch) return;
+
+        const dx = touch.clientX - panStartX;
+        const dy = touch.clientY - panStartY;
+        if (Math.abs(dx) < SWIPE_SLOP && Math.abs(dy) < SWIPE_SLOP) {
+            handleTap(touch.clientX, touch.clientY);
+        }
+        return;
+    }
+
     if (!swipeTracking) return;
     swipeTracking = false;
-
-    const touch = e.changedTouches[0];
     if (!touch) return;
 
     const dx = touch.clientX - swipeStartX;
     const dy = touch.clientY - swipeStartY;
 
+    if (Math.abs(dx) < SWIPE_SLOP && Math.abs(dy) < SWIPE_SLOP) {
+        handleTap(touch.clientX, touch.clientY);
+        return;
+    }
+
     if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) <= Math.abs(dy)) return;
+    lastTapAt = 0;
     if (dx < 0) {
         carouselNext();
     } else {
@@ -526,10 +738,18 @@ const carouselOverlay = document.getElementById('carouselOverlay');
 carouselOverlay.addEventListener('touchstart', swipeStart, { passive: true });
 carouselOverlay.addEventListener('touchmove', swipeMove, { passive: false });
 carouselOverlay.addEventListener('touchend', swipeEnd);
-carouselOverlay.addEventListener('touchcancel', () => { swipeTracking = false; });
+carouselOverlay.addEventListener('touchcancel', () => {
+    swipeTracking = false;
+    panTracking = false;
+    pinchStartDistance = 0;
+    if (zoomScale < 1.05) resetZoom();
+});
 
-// Close carousel on overlay click (not on the image)
+// Close carousel on overlay click (not on the image). A click the browser synthesizes at the
+// end of a pinch or a pan must not close it; the next touch clears the flag, so a deliberate
+// tap on the black area still closes the gallery.
 carouselOverlay.addEventListener('click', (e) => {
+    if (zoomGestureAt && Date.now() - zoomGestureAt < 500) return;
     if (e.target.id === 'carouselOverlay' ||
         e.target.classList.contains('carousel-container') ||
         e.target.classList.contains('carousel-image-wrapper')) {
