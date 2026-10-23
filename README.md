@@ -389,7 +389,9 @@ python tools/make_pwa_icons.py
 Манифест лежит в корне (`/manifest.webmanifest`), потому что Google при сборке WebAPK забирает его
 и иконки **без сессии**: эти три пути открыты в sitehub и Cloudflare Access (см. «Публикация в
 интернете»). Сам манифест отдаёт отдельный маршрут с типом `application/manifest+json`, а
-`/favicon.ico` перенаправляет на `/static/favicon.svg`.
+`/favicon.ico` перенаправляет на `/static/favicon.svg`. Заставка при запуске тёмная
+(`background_color` и `theme_color` — `#16171b`): на светлом фоне белые значки статусной строки
+не читались.
 
 ## Команды
 

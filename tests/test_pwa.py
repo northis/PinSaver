@@ -143,8 +143,13 @@ def test_the_share_page_is_always_dark() -> None:
     assert THEME_META["share.html"] in html
 
 
-def test_the_manifest_sets_the_dark_theme_color() -> None:
-    assert manifest()["theme_color"] == SHARE_THEME_COLOR
+def test_the_manifest_chrome_is_dark() -> None:
+    """The installed app launches on a dark splash, so the white status bar icons stay
+    readable: the old light background made the top of the launch screen unreadable."""
+    data = manifest()
+
+    assert data["theme_color"] == SHARE_THEME_COLOR
+    assert data["background_color"] == SHARE_THEME_COLOR
 
 
 def test_the_manifest_moved_out_of_static(client: TestClient) -> None:
