@@ -147,6 +147,18 @@ def media_type(detected: str | None, filename: str) -> str | None:
     return MEDIA_TYPES.get(Path(filename).suffix.lstrip(".").lower())
 
 
+def is_image_name(filename: str) -> bool:
+    """
+    Whether a file name has an extension the archive serves as an image.
+
+    `originals/` should hold nothing but pictures, but a stray copy of the database, a
+    note or a backup used to be handed out by `/images` all the same: the route took any
+    bare file name. An image extension is the cheapest way to keep the folder's accidents
+    private; the bytes still decide the content type.
+    """
+    return Path(filename).suffix.lstrip(".").lower() in MEDIA_TYPES
+
+
 @dataclass(frozen=True)
 class PreparedImage:
     """

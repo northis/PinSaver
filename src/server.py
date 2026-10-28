@@ -504,9 +504,10 @@ def get_image(filename: str):
     """
     Serve an image from the originals folder.
 
-    Only a bare file name is accepted: anything with a path separator (on Windows
-    `\\` counts, and `%5c` reaches the handler as an ordinary character) would let a
-    request read files outside `originals/`.
+    Only a bare file name with an image extension is accepted: anything with a path
+    separator (on Windows `\\` counts, and `%5c` reaches the handler as an ordinary
+    character) would let a request read files outside `originals/`, and a stray database,
+    note or backup that ended up in the folder is not a picture to hand out.
 
     The content type comes from the bytes, not from the extension: a file stored before
     2.7.3 may still be HEIC, which no Chromium browser can show, so it is converted to
@@ -523,6 +524,9 @@ def get_image(filename: str):
     file_path = (originals_path / filename).resolve()
 
     if Path(filename).name != filename or not file_path.is_relative_to(originals_path):
+        raise HTTPException(status_code=404, detail="image not found")
+
+    if not images.is_image_name(filename):
         raise HTTPException(status_code=404, detail="image not found")
 
     if not file_path.is_file():
