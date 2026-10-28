@@ -22,20 +22,30 @@ def get_originals_path(base_path: Path) -> Path:
     return base_path / "originals"
 
 
-def file_exists_in_originals(originals_path: Path, file_id: str, file_extension: str) -> bool:
+#: Extensions looked up for a pin from the export, after the one it names.
+FILE_EXTENSION_CANDIDATES = ("jpg", "jpeg", "png", "webp", "gif", "avif", "heic", "heif")
+
+
+def find_original_extension(originals_path: Path, file_id: str, file_extension: str) -> str | None:
     """
-    Check if an image file exists in the originals folder.
+    Extension of the archived file for a pin, or None when it is not on disk.
+    
+    The export names the extension Pinterest had, but the archive may hold another one:
+    HEIC is converted to JPEG when it is saved (and by `convert_heic.py`), and an original
+    that moved to WebP keeps its sized JPG copies.
     
     Args:
         originals_path: Path to the originals folder.
         file_id: The file ID (32-character hex string).
-        file_extension: The file extension (jpg, png, webp, etc.).
+        file_extension: The extension the export names (jpg, png, webp, etc.).
     
     Returns:
-        True if the file exists, False otherwise.
+        The extension of the file that exists, or None.
     """
-    file_path = originals_path / f"{file_id}.{file_extension}"
-    return file_path.exists()
+    for candidate in (file_extension, *FILE_EXTENSION_CANDIDATES):
+        if (originals_path / f"{file_id}.{candidate}").exists():
+            return candidate
+    return None
 
 
 def import_pins(base_path: Path, db_path: Path | None = None) -> dict:
@@ -80,14 +90,17 @@ def import_pins(base_path: Path, db_path: Path | None = None) -> dict:
             for parsed_pin in parse_html_file(html_file):
                 stats["pins_found"] += 1
                 
-                if not file_exists_in_originals(originals_path, parsed_pin.file_id, parsed_pin.file_extension):
+                file_extension = find_original_extension(
+                    originals_path, parsed_pin.file_id, parsed_pin.file_extension
+                )
+                if file_extension is None:
                     stats["pins_skipped_no_file"] += 1
                     continue
                 
                 pin = Pin(
                     pin_id=parsed_pin.pin_id,
                     file_id=parsed_pin.file_id,
-                    file_extension=parsed_pin.file_extension,
+                    file_extension=file_extension,
                     pinterest_url=parsed_pin.pinterest_url,
                     original_url=parsed_pin.original_url,
                     source_date=parsed_pin.source_date

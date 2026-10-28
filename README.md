@@ -48,9 +48,10 @@ cd PinSaver
 python -m pip install -r src/requirements.txt -r src/requirements-tools.txt
 ```
 
-Нужен Python 3.10+. `requirements.txt` — то, что нужно серверу (его же ставит контейнер),
-`requirements-tools.txt` — хостовые скрипты и инструменты: `updateDelete.py` требует Playwright с
-браузером, `importer.py` — BeautifulSoup, `tools/` — Pillow.
+Нужен Python 3.10+. `requirements.txt` — то, что нужно серверу (его же ставит контейнер), включая
+Pillow и pillow-heif: сервер сам конвертирует HEIC в JPEG. `requirements-tools.txt` — хостовые скрипты
+и инструменты: `updateDelete.py` требует Playwright с браузером, `importer.py` — BeautifulSoup,
+`tools/` — Pillow.
 
 Тесты идут офлайн и не трогают архив:
 
@@ -286,6 +287,41 @@ iOS share-цель не поддерживает — там остаётся Sav
 - кнопка `✕` на карточке удаляет пин из архива, с галочкой «Also delete the image file» — вместе
   с файлом в `originals/`.
 
+## Форматы картинок
+
+Pinterest хранит часть пинов в HEIC (загрузки с iPhone). Chrome, Firefox и Edge такие файлы не
+показывают вообще: карточка оставалась пустой, хотя сам файл скачивался нормально. Поэтому сервер
+конвертирует HEIC в JPEG сам:
+
+- **при сохранении пина** (`src/archive.py` → `src/images.py`): в `originals/` ложится
+  `<file_id>.jpg`, в базе — `file_extension = jpg`, а рядом остаётся исходный `<file_id>.heic`
+  (архив хранит оригинал, сайт показывает JPEG); `original_url` — по-прежнему ссылка на HEIC;
+- **при отдаче** (`GET /images/{filename}`): файл, сохранённый раньше, отдаётся как JPEG на лету —
+  старые пины видны без миграции;
+- **пачкой по всему архиву** — скриптом ниже.
+
+Формат определяется по байтам, а не по расширению в ссылке: Pinterest не гарантирует, что по `…jpg`
+вернётся именно JPEG. Нечитаемый HEIC всё равно попадает в архив — пустая карточка лучше потерянного
+пина, а конвертацию можно повторить.
+
+Чтобы разом переложить уже сохранённые HEIC в JPEG и поправить базу:
+
+```bash
+python src/convert_heic.py --dry-run   # посмотреть, что изменится
+python src/convert_heic.py             # конвертировать
+```
+
+Скрипт трогает только файлы, которые действительно HEIC, поэтому его можно запускать повторно.
+Исходные HEIC он оставляет рядом с JPEG — ровно так же, как это делает сохранение пина;
+`--delete-originals` удаляет их после успешной конвертации (сначала сделай `python src/backup.py`).
+
+В Docker архив лежит по пути `/data`, поэтому скрипт запускается внутри контейнера:
+
+```bash
+docker compose exec pinsaver python src/convert_heic.py --dry-run
+docker compose exec pinsaver python src/convert_heic.py
+```
+
 ## Проверка удалённых пинов
 
 ```bash
@@ -403,6 +439,7 @@ python tools/make_pwa_icons.py
 | `python src/updateDelete.py` | пометить пины, удалённые с Pinterest |
 | `python src/backup.py` | инкрементальный бэкап в `backups/` |
 | `python src/migrate_duplicates.py` | схлопнуть дубликаты по `file_id` |
+| `python src/convert_heic.py` | перевести сохранённые HEIC в JPEG (и поправить базу) |
 | `python src/buildinfo.py` | напечатать версию, коммит и ссылки |
 | `python tools/bump_version.py X.Y.Z` | поднять версию в `src/` и `extension/` |
 | `python tools/make_extension_icons.py` | перерисовать PNG-иконки из `extension/icon.svg` |
@@ -430,7 +467,7 @@ python tools/make_pwa_icons.py
 | GET | `/manifest.webmanifest` | PWA-манифест из корня (`application/manifest+json`, публичный путь) |
 | GET | `/favicon.ico` | редирект на `/static/favicon.svg` |
 | GET | `/api/version` | версия, коммит и ссылки на репозиторий |
-| GET | `/images/{filename}` | отдать картинку из `originals/` |
+| GET | `/images/{filename}` | отдать картинку из `originals/` (HEIC — уже сконвертированным в JPEG) |
 | GET | `/health` | проверка доступности сервера |
 | GET | `/admin` | страница обслуживания — только на админ-порту |
 | GET | `/api/admin/state` | сводка архива для страницы обслуживания — только на админ-порту |
@@ -448,14 +485,16 @@ PinSaver/
 │   ├── server.py             # FastAPI: API, отдача сайта и картинок, /share, /sw.js и админ-порт
 │   ├── models.py             # схема SQLite, модель Pin и пути к данным
 │   ├── archive.py            # добавление пина: дедуп, рейтинг, фолбэки скачивания
+│   ├── images.py             # форматы: определение по байтам и HEIC → JPEG
 │   ├── pinterest.py          # резолвер: ссылка → file_id и ссылка на картинку
 │   ├── buildinfo.py          # версия и коммит (источник версии проекта)
 │   ├── parser.py             # разбор HTML-экспорта Pinterest
 │   ├── importer.py           # импорт разобранных пинов в базу
 │   ├── migrate_duplicates.py # схлопывание дубликатов по file_id
+│   ├── convert_heic.py       # HEIC в originals/ → JPEG, с правкой базы
 │   ├── updateDelete.py       # проверка удалённых пинов через Playwright
 │   ├── backup.py             # бэкапы: инкрементальный в backups/ и полный потоком
-│   ├── requirements.txt      # рантайм: его же ставит контейнер
+│   ├── requirements.txt      # рантайм: его же ставит контейнер (Pillow, pillow-heif)
 │   ├── requirements-tools.txt # хостовые скрипты: Playwright, BeautifulSoup, Pillow
 │   ├── requirements-dev.txt  # pytest
 │   └── static/               # сайт: index.html, app.js, styles.css, sw.js, share.html,

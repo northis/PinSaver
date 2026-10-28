@@ -72,12 +72,14 @@
     /**
      * Build original URL from file ID
      * @param {string} fileId - 32-character file hash
-     * @param {string} extension - File extension (will use jpg for unsupported formats)
+     * @param {string} extension - File extension (jpg when the format is unknown)
      * @returns {string} Original image URL
      */
     function buildOriginalUrl(fileId, extension) {
-        // Use jpg for unsupported formats like heic - server will handle fallback
-        const safeExt = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension.toLowerCase()) ? extension : 'jpg';
+        // HEIC is requested as it is: the server converts it to JPEG (src/images.py),
+        // and a made-up .jpg URL would only fall back to a smaller sized copy.
+        const safeExt = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif']
+            .includes(extension.toLowerCase()) ? extension : 'jpg';
         return `https://i.pinimg.com/originals/${fileId.slice(0,2)}/${fileId.slice(2,4)}/${fileId.slice(4,6)}/${fileId}.${safeExt}`;
     }
 

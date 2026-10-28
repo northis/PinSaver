@@ -8,7 +8,7 @@ marks already-archived pins in favorites and pushes the archive back to Pinteres
 
 | Path | What is there |
 | --- | --- |
-| `src/` | FastAPI server and hand-run scripts (`server.py`, `models.py`, `archive.py`, `pinterest.py`, `importer.py`, `updateDelete.py`, `backup.py`, `buildinfo.py`) |
+| `src/` | FastAPI server and hand-run scripts (`server.py`, `models.py`, `archive.py`, `images.py`, `pinterest.py`, `importer.py`, `updateDelete.py`, `backup.py`, `convert_heic.py`, `buildinfo.py`) |
 | `src/static/` | web UI served as-is, no build step (HTML/CSS/JS, PWA manifest, icons, service worker, maintenance page `admin.*`) |
 | `extension/` | Chrome MV3 extension (content script, service worker, options page, icons) |
 | `tools/` | scripts run by hand whose output is committed (`make_extension_icons.py`, `make_pwa_icons.py`, `bump_version.py`) |
@@ -28,6 +28,7 @@ python src/backup.py                            # incremental backup into backup
 python src/updateDelete.py                      # mark pins deleted from Pinterest (needs chromium)
 python src/importer.py                          # rebuild the database from a Pinterest HTML export
 python src/migrate_duplicates.py                # merge duplicates by file_id
+python src/convert_heic.py                      # convert stored HEIC originals to JPEG
 python tools/bump_version.py X.Y.Z              # bump the version everywhere
 python tools/bump_version.py --check            # verify every copy of the version matches
 python tools/make_extension_icons.py            # regenerate extension PNGs from extension/icon.svg
@@ -107,6 +108,9 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
 - Frontend is vanilla JS/CSS/HTML with no bundler and no npm; `src/static/` is served as-is and CSS/JS
   URLs are cache-busted with `?v=<version>` by the `/` route in `server.py`.
 - New API routes go into `src/server.py` with a docstring, and the README API table gets a row.
+- `src/images.py` decides what a downloaded image is stored as: the format comes from the bytes, never
+  from the extension of the link, and HEIC/HEIF is converted to JPEG (the HEIC is kept next to it, and
+  `/images` converts a legacy `.heic` on the fly).
 - The extension talks to the server only through `background.js` (`API_REQUEST` messages) to bypass
   Chrome Private Network Access; `server.py` answers Pinterest origins with CORS/PNA headers. A
   message carries only `path` and fetch `options`: `content.js` never knows the server address,

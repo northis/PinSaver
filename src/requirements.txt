@@ -4,3 +4,8 @@ fastapi==0.128.0
 uvicorn==0.40.0
 httpx==0.28.1
 dotenv==0.9.9
+# Images: HEIC originals are converted to JPEG when they are saved (src/images.py), so
+# the runtime decodes images itself. Pillow is pinned here too, because it is no longer
+# only a tool for the host scripts; pillow-heif brings libheif in its own wheel.
+Pillow==12.1.0
+pillow-heif==1.8.1

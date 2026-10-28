@@ -13,11 +13,18 @@ from typing import Mapping, Optional
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import backup
+import images
 from archive import AddPinError, add_pin_from_url
 from buildinfo import build_info
 from models import get_db_path, get_originals_path
@@ -426,6 +433,31 @@ def check_pins_exist(request: CheckPinsRequest, _: None = Depends(require_csrf))
     return {"existing": existing}
 
 
+def delete_original_files(file_id: str) -> bool:
+    """
+    Remove every file the archive stored for an image.
+
+    A converted HEIC leaves two: the JPEG the site serves and the HEIC it was made from,
+    so the extension in the database does not name every file.
+
+    Args:
+        file_id: The 32-character file id shared by the copies.
+
+    Returns:
+        True when at least one file was removed.
+    """
+    originals_path = get_originals_path()
+    if not originals_path.is_dir():
+        return False
+
+    deleted = False
+    for candidate in originals_path.iterdir():
+        if candidate.is_file() and candidate.stem == file_id:
+            candidate.unlink()
+            deleted = True
+    return deleted
+
+
 @app.delete("/api/pins/{pin_id}")
 def delete_pin(
     pin_id: str,
@@ -445,7 +477,7 @@ def delete_pin(
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT file_id, file_extension FROM pins WHERE pin_id = ?", (pin_id,))
+    cursor.execute("SELECT file_id FROM pins WHERE pin_id = ?", (pin_id,))
     row = cursor.fetchone()
     
     if not row:
@@ -453,18 +485,12 @@ def delete_pin(
         raise HTTPException(status_code=404, detail=f"Pin {pin_id} not found")
     
     file_id = row["file_id"]
-    file_extension = row["file_extension"]
     
     cursor.execute("DELETE FROM pins WHERE pin_id = ?", (pin_id,))
     conn.commit()
     conn.close()
     
-    file_deleted = False
-    if delete_file:
-        file_path = get_originals_path() / f"{file_id}.{file_extension}"
-        if file_path.exists():
-            file_path.unlink()
-            file_deleted = True
+    file_deleted = delete_original_files(file_id) if delete_file else False
     
     return {
         "status": "deleted",
@@ -482,11 +508,16 @@ def get_image(filename: str):
     `\\` counts, and `%5c` reaches the handler as an ordinary character) would let a
     request read files outside `originals/`.
 
+    The content type comes from the bytes, not from the extension: a file stored before
+    2.7.3 may still be HEIC, which no Chromium browser can show, so it is converted to
+    JPEG here. New pins are converted when they are saved (`archive.py`), and
+    `convert_heic.py` fixes the files already on disk.
+
     Args:
         filename: The image filename (file_id.extension).
 
     Returns:
-        The image file.
+        The image file, as JPEG when it had to be converted.
     """
     originals_path = get_originals_path().resolve()
     file_path = (originals_path / filename).resolve()
@@ -497,7 +528,22 @@ def get_image(filename: str):
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="image not found")
 
-    return FileResponse(file_path)
+    with file_path.open("rb") as handle:
+        head = handle.read(images.SNIFF_BYTES)
+
+    detected = images.sniff(head)
+    media_type = images.media_type(detected, filename)
+
+    if detected in images.CONVERTED_FORMATS:
+        try:
+            converted = images.to_jpeg(file_path.read_bytes())
+        except images.ImageConversionError:
+            # The file exists and still downloads; serving it as it is beats a 404.
+            pass
+        else:
+            return Response(content=converted, media_type="image/jpeg")
+
+    return FileResponse(file_path, media_type=media_type)
 
 
 @app.get("/favicon.ico")

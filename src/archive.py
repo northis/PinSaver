@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import httpx
 
+import images
 from models import Pin, get_originals_path, insert_pin
 
 #: `https://i.pinimg.com/<kind>/xx/yy/zz/<32 hex>.<ext>`, with or without a query string.
@@ -24,8 +25,10 @@ ORIGINALS_KIND = "originals"
 #: Sizes Pinterest keeps serving when the original is gone.
 FALLBACK_SIZES = ("736x", "564x", "474x", "236x")
 #: Other formats of the same file id worth trying: one pin's original had moved to .webp
-#: while its sized copies stayed .jpg.
-FALLBACK_EXTENSIONS = ("jpg", "webp", "png")
+#: while its sized copies stayed .jpg. `heic` is here because Pinterest keeps iPhone
+#: uploads as HEIC only; `images.py` turns those into JPEG, which is better than the
+#: 736x copy that would otherwise be the best left.
+FALLBACK_EXTENSIONS = ("jpg", "webp", "png", "heic")
 DOWNLOAD_TIMEOUT_SECONDS = 30.0
 
 
@@ -202,7 +205,7 @@ def add_pin_from_url(
     parts = file_id_from_url(original_url)
     if not parts:
         raise AddPinError("invalid_url", "Invalid original_url format")
-    file_id, extension = parts
+    file_id, url_extension = parts
 
     cursor.execute("SELECT id, pin_id, is_deleted FROM pins WHERE file_id = ?", (file_id,))
     existing_by_file = cursor.fetchone()
@@ -218,7 +221,7 @@ def add_pin_from_url(
                 message=f"Pin restored with new ID {pin_id} (was {existing_by_file['pin_id']})",
                 pin_id=pin_id,
                 file_id=file_id,
-                file_extension=extension,
+                file_extension=url_extension,
             )
 
         cursor.execute("UPDATE pins SET rating = rating + 1 WHERE id = ?", (existing_by_file["id"],))
@@ -231,7 +234,7 @@ def add_pin_from_url(
             ),
             pin_id=pin_id,
             file_id=file_id,
-            file_extension=extension,
+            file_extension=url_extension,
         )
 
     originals_path = get_originals_path()
@@ -239,6 +242,7 @@ def add_pin_from_url(
 
     size = "local"
     image_url = original_url
+    extension = images.stored_extension(url_extension)
     image_path = originals_path / f"{file_id}.{extension}"
 
     if not image_path.exists():
@@ -247,16 +251,29 @@ def add_pin_from_url(
             own_client = new_client()
             client = own_client
         try:
-            downloaded = download_image(client, file_id, extension, original_url)
+            downloaded = download_image(client, file_id, url_extension, original_url)
         finally:
             if own_client is not None:
                 own_client.close()
 
-        extension = downloaded.extension
+        try:
+            prepared = images.prepare(downloaded.content, downloaded.extension)
+        except images.ImageConversionError:
+            # A pin whose HEIC cannot be decoded is still archived: the file downloads,
+            # it just cannot be shown, and dropping the record would be worse.
+            prepared = images.PreparedImage(downloaded.content, downloaded.extension)
+
         size = downloaded.size
         image_url = downloaded.url
+        extension = prepared.extension
         image_path = originals_path / f"{file_id}.{extension}"
-        image_path.write_bytes(downloaded.content)
+        image_path.write_bytes(prepared.content)
+
+        if prepared.original:
+            # The HEIC itself stays: the site shows the JPEG, the archive keeps the
+            # original (`convert_heic.py` leaves the same pair behind).
+            original_path = originals_path / f"{file_id}.{prepared.original_extension}"
+            original_path.write_bytes(prepared.original)
 
     insert_pin(conn, Pin(
         pin_id=pin_id,

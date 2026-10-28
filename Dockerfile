@@ -13,8 +13,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Runtime dependencies only: Playwright, BeautifulSoup and Pillow live in
+# Runtime dependencies only: Playwright and BeautifulSoup live in
 # src/requirements-tools.txt and belong to the host scripts, never to the image.
+# Pillow and pillow-heif are runtime now: HEIC originals are converted to JPEG
+# (src/images.py), and pillow-heif carries libheif in its own manylinux wheel.
 COPY src/requirements.txt ./
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt
