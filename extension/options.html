@@ -156,6 +156,59 @@
             border-top: 1px solid #e0e0e0;
         }
 
+        h2 {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .save-log {
+            margin: 12px 0 16px;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .save-entry {
+            padding: 8px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .save-entry:last-child {
+            border-bottom: none;
+        }
+
+        .save-entry .what {
+            color: #333;
+            font-weight: 500;
+            word-break: break-word;
+        }
+
+        .save-entry .what.error {
+            color: #c62828;
+        }
+
+        .save-entry .where,
+        .save-entry .detail {
+            margin-top: 2px;
+            color: #999;
+            word-break: break-all;
+        }
+
+        .save-entry .detail.error {
+            color: #c62828;
+        }
+
+        button.secondary {
+            padding: 10px 22px;
+            background: white;
+            color: #e60023;
+            border: 2px solid #e60023;
+        }
+
+        button.secondary:hover {
+            background: #fff0f2;
+        }
+
         .footer {
             display: flex;
             align-items: center;
@@ -205,6 +258,17 @@
         <button id="saveBtn">Save Settings</button>
 
         <div class="status" id="status"></div>
+
+        <hr class="divider">
+
+        <h2>Recent saves</h2>
+        <p class="hint">
+            The last 10 images sent from the page menu. <strong>server</strong> — the archive downloaded
+            the picture itself; <strong>browser</strong> — the extension sent the bytes, because the site
+            refused the archive; <strong>not sent</strong> — the link could not be read at all.
+        </p>
+        <div class="save-log" id="saveLog">Loading...</div>
+        <button id="refreshLog" type="button" class="secondary">Refresh</button>
 
         <hr class="divider">
 

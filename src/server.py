@@ -9,9 +9,10 @@ from collections.abc import Iterator
 from html import escape
 from pathlib import Path
 from typing import Mapping, Optional
+from urllib.parse import unquote
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Query, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, Header, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     FileResponse,
@@ -25,7 +26,7 @@ from pydantic import BaseModel
 
 import backup
 import images
-from archive import AddPinError, add_pin_from_url, add_web_image
+from archive import AddPinError, add_pin_from_url, add_web_image, add_web_image_bytes
 from buildinfo import build_info
 from models import get_db_path, get_originals_path, init_db
 from pinterest import PinLookupError, extract_pin_id, resolve_pin
@@ -335,6 +336,17 @@ class AddWebPinRequest(BaseModel):
 WEB_PIN_STATUS = {"invalid_url": 400, "not_an_image": 400, "image_unavailable": 502}
 
 
+def _web_pin_response(result) -> dict:
+    """What both ways of saving an image from another site answer with."""
+    return {
+        "status": result.status,
+        "pin_id": result.pin_id,
+        "file_id": result.file_id,
+        "file_extension": result.file_extension,
+        "message": result.message,
+    }
+
+
 @app.post("/api/pins/web")
 def add_web_pin(request: AddWebPinRequest, _: None = Depends(require_csrf)):
     """
@@ -359,13 +371,44 @@ def add_web_pin(request: AddWebPinRequest, _: None = Depends(require_csrf)):
     finally:
         conn.close()
 
-    return {
-        "status": result.status,
-        "pin_id": result.pin_id,
-        "file_id": result.file_id,
-        "file_extension": result.file_extension,
-        "message": result.message,
-    }
+    print(f"web pin: {result.status} {result.pin_id} from {request.page_url[:200]!r}", flush=True)
+    return _web_pin_response(result)
+
+
+@app.post("/api/pins/web/upload")
+def add_web_pin_upload(
+    payload: bytes = Body(..., description="The image file itself"),
+    page_url: str = Header("", alias="X-PinSaver-Page-Url"),
+    image_url: str = Header("", alias="X-PinSaver-Image-Url"),
+    _: None = Depends(require_csrf),
+):
+    """
+    Save an image the extension downloaded in its own browser.
+
+    The context menu falls back to this when the archive cannot fetch the picture itself: a
+    bot wall or a host on the user's own network answers the server with 403, while the
+    browser already has the bytes. The two links arrive percent-encoded in headers, because
+    a header cannot carry a URL as it is.
+
+    Args:
+        payload: The image bytes, as they came from the site.
+        page_url: Encoded page the image was right-clicked on.
+        image_url: Encoded link to the image itself, empty for a `data:` link.
+
+    Returns:
+        Dictionary with status, pin_id, file_id, file_extension and message.
+    """
+    conn = get_db_connection()
+    try:
+        result = add_web_image_bytes(conn, payload, unquote(image_url), unquote(page_url))
+    except AddPinError as error:
+        print(f"web pin upload: {error.reason} ({error.detail})", flush=True)
+        raise HTTPException(status_code=WEB_PIN_STATUS[error.reason], detail=error.reason)
+    finally:
+        conn.close()
+
+    print(f"web pin upload: {result.status} {result.pin_id} ({len(payload)} bytes)", flush=True)
+    return _web_pin_response(result)
 
 
 class ResolvePinRequest(BaseModel):

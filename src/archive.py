@@ -311,10 +311,9 @@ def add_web_image(
     """
     Save an image from a site other than Pinterest.
 
-    The image is downloaded from whichever URL it lives at, and its file id is the hash of
-    the stored bytes: the same picture saved twice only raises the rating. The pin is
-    marked third-party by its `source_url` (the page it was found on) and never appears in
-    the sync back to Pinterest.
+    The image is downloaded from whichever URL it lives at. When a site refuses an
+    anonymous download (a bot wall, an intranet host, a `data:` link), the extension hands
+    the bytes over instead: `add_web_image_bytes`.
 
     Args:
         conn: open SQLite connection (this function commits).
@@ -347,15 +346,52 @@ def add_web_image(
     if response.status_code != 200 or not response.content:
         raise AddPinError("image_unavailable", f"{image_url}: HTTP {response.status_code}")
 
-    if len(response.content) > MAX_WEB_IMAGE_BYTES:
-        raise AddPinError("image_unavailable", f"{image_url}: larger than {MAX_WEB_IMAGE_BYTES} bytes")
+    return _store_web_image(conn, response.content, image_url, page_url)
+
+
+def add_web_image_bytes(
+    conn,
+    content: bytes,
+    image_url: str = "",
+    page_url: str = "",
+) -> AddResult:
+    """
+    Save an image the extension downloaded in the browser.
+
+    The browser can read a picture the archive cannot: a page behind a bot wall, a host on
+    the user's own network, a `data:` link. The bytes go through the same checks and the
+    same deduplication as a downloaded one.
+
+    Raises:
+        AddPinError: `invalid_url` (neither link sent) or `not_an_image`.
+    """
+    return _store_web_image(conn, content, image_url, page_url)
+
+
+def _store_web_image(conn, content: bytes, image_url: str, page_url: str) -> AddResult:
+    """
+    Store image bytes as a third-party pin and report what happened.
+
+    The file id is the hash of the stored bytes, so the same picture saved twice only
+    raises the rating. The pin has no `pinterest_url`, and its `source_url` is never empty:
+    an empty one marks a Pinterest pin and would put an id Pinterest never issued into the
+    sync.
+    """
+    if not page_url and not image_url:
+        raise AddPinError("invalid_url", "no page or image link to remember")
+
+    if not content:
+        raise AddPinError("not_an_image", "the request carried no image")
+
+    if len(content) > MAX_WEB_IMAGE_BYTES:
+        raise AddPinError("image_unavailable", f"larger than {MAX_WEB_IMAGE_BYTES} bytes")
 
     # Bytes, not the extension of the link: a saved file has to be one the site can serve
-    if images.sniff(response.content) is None:
+    if images.sniff(content) is None:
         raise AddPinError("not_an_image", "the link is not an image")
 
     try:
-        prepared = images.prepare(response.content, "jpg")
+        prepared = images.prepare(content, "jpg")
     except images.ImageConversionError as error:
         raise AddPinError("image_unavailable", f"cannot convert the image: {error}")
 
@@ -394,8 +430,6 @@ def add_web_image(
         pinterest_url="",
         original_url=image_url,
         source_date=int(time.time()),
-        # Never empty: an empty source_url is what marks a Pinterest pin, and the sync
-        # would then try to repin an id Pinterest never issued
         source_url=page_url or image_url,
     ))
     conn.commit()

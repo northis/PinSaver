@@ -127,6 +127,64 @@ def test_a_missing_page_falls_back_to_the_image_link(client: TestClient, downloa
     assert client.get("/api/pins/sync").json() == {"pin_ids": [], "total": 0}
 
 
+def test_bytes_downloaded_by_the_browser_are_saved(
+    client: TestClient, data_dir: Path
+) -> None:
+    """A site that refuses the archive is handed over by the extension as raw bytes."""
+    payload = png_bytes()
+
+    response = client.post(
+        "/api/pins/web/upload",
+        content=payload,
+        headers={
+            **HEADER,
+            "Content-Type": "image/png",
+            # Links travel percent-encoded: a header cannot carry a URL as it is
+            "X-PinSaver-Page-Url": "https%3A%2F%2Fexample.com%2Fpost%2F42",
+            "X-PinSaver-Image-Url": "https%3A%2F%2Fcdn.example.com%2Fcat.png",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "added"
+    assert body["file_extension"] == "png"
+    assert (data_dir / "originals" / f"{body['file_id']}.png").read_bytes() == payload
+
+    pin = client.get("/api/pins").json()["pins"][0]
+    assert pin["source_url"] == PAGE_URL
+    assert pin["original_url"] == IMAGE_URL
+
+
+def test_uploaded_bytes_that_are_not_an_image_are_a_400(client: TestClient) -> None:
+    response = client.post(
+        "/api/pins/web/upload",
+        content=b"<html>not a picture</html>",
+        headers={**HEADER, "Content-Type": "image/png", "X-PinSaver-Page-Url": PAGE_URL},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "not_an_image"}
+
+
+def test_an_upload_without_any_link_is_a_400(client: TestClient) -> None:
+    """The pin has to remember where it came from: an empty source_url means Pinterest."""
+    response = client.post(
+        "/api/pins/web/upload", content=png_bytes(), headers={**HEADER, "Content-Type": "image/png"}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "invalid_url"}
+
+
+def test_upload_without_the_guard_header_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/pins/web/upload", content=png_bytes(), headers={"Content-Type": "image/png"}
+    )
+
+    assert response.status_code == 403
+
+
 def test_a_link_that_is_not_an_image_is_a_400(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

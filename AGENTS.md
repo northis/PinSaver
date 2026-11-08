@@ -112,9 +112,11 @@ temporary directory. There is no CI, so also run `node --check` on the JS files 
   from the extension of the link, and HEIC/HEIF is converted to JPEG (the HEIC is kept next to it, and
   `/images` converts a legacy `.heic` on the fly).
 - A non-empty `pins.source_url` marks an image saved from another site (the extension's context menu,
-  `POST /api/pins/web`, `archive.add_web_image`). Everything that assumes a Pinterest pin must skip
-  those rows: `GET /api/pins/sync` (the repin list) and `updateDelete.py` already filter on
-  `source_url = ''`; keep it that way, or such a pin gets "repinned" with an id Pinterest never issued.
+  `POST /api/pins/web` for a link the archive downloads, `POST /api/pins/web/upload` for bytes the
+  browser already has, `archive.add_web_image` / `add_web_image_bytes`). Everything that assumes a
+  Pinterest pin must skip those rows: `GET /api/pins/sync` (the repin list) and `updateDelete.py`
+  already filter on `source_url = ''`; keep it that way, or such a pin gets "repinned" with an id
+  Pinterest never issued.
 - The extension talks to the server only through `background.js` (`API_REQUEST` messages) to bypass
   Chrome Private Network Access; `server.py` answers Pinterest origins with CORS/PNA headers. A
   message carries only `path` and fetch `options`: `content.js` never knows the server address,

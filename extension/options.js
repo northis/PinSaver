@@ -9,6 +9,14 @@ const REPO_URL = 'https://github.com/northis/PinSaver';
 // must never be given up when the address changes
 const REQUIRED_ORIGINS = ['http://localhost:8000', 'http://127.0.0.1:8000'];
 
+// The archive keeps its last save attempts in local storage, newest first
+const SAVE_LOG_KEY = 'saveLog';
+const SAVE_LOG_LIMIT = 10;
+//: The first archive version that accepts an image from another site
+const MIN_WEB_PINS_VERSION = '2.8.0';
+const SAVE_LABELS = { added: 'saved', exists: 'already in the archive', error: 'error' };
+const VIA_LABELS = { server: 'server', browser: 'browser', none: 'not sent' };
+
 // Origin of the address in storage, so a save to another address can drop the
 // permission the previous address was granted
 let previousOrigin = null;
@@ -81,6 +89,85 @@ function showStatus(text, kind) {
 }
 
 /**
+ * Compare two dotted versions.
+ * @param {string} version - Version reported by the archive
+ * @param {string} minimum - Version a feature needs
+ * @returns {boolean} True when `version` is at least `minimum`
+ */
+function versionAtLeast(version, minimum) {
+    const have = String(version).split('.').map(Number);
+    const need = minimum.split('.').map(Number);
+    for (let i = 0; i < need.length; i++) {
+        if ((have[i] || 0) !== need[i]) return (have[i] || 0) > need[i];
+    }
+    return true;
+}
+
+/**
+ * Shorten a stored link for one line: the host and path say more than the whole URL.
+ * @param {string} url - Page or image link
+ * @returns {string} Something readable, at most 90 characters
+ */
+function shortUrl(url) {
+    if (!url) return '';
+    if (url.startsWith('data:')) return 'data: image';
+    let text = url;
+    try {
+        const parsed = new URL(url);
+        text = parsed.hostname.replace(/^www\./, '') + (parsed.pathname === '/' ? '' : parsed.pathname);
+    } catch {
+        // A stored value that no longer parses is still worth showing as it is
+    }
+    return text.length > 90 ? text.slice(0, 90) + '…' : text;
+}
+
+/**
+ * Draw the last save attempts: the badge disappears in seconds, so a refusal has to stay
+ * readable somewhere.
+ */
+async function renderSaveLog() {
+    const list = document.getElementById('saveLog');
+    const stored = await chrome.storage.local.get([SAVE_LOG_KEY]);
+    const entries = Array.isArray(stored[SAVE_LOG_KEY])
+        ? stored[SAVE_LOG_KEY].slice(0, SAVE_LOG_LIMIT)
+        : [];
+
+    if (!entries.length) {
+        list.textContent =
+            'Nothing yet: right-click an image in Chrome and choose “Save image to PinSaver”.';
+        return;
+    }
+
+    list.replaceChildren(...entries.map(entry => {
+        const row = document.createElement('div');
+        row.className = 'save-entry';
+
+        const what = document.createElement('div');
+        what.className = entry.status === 'error' ? 'what error' : 'what';
+        what.textContent = [
+            new Date(entry.at).toLocaleString(),
+            SAVE_LABELS[entry.status] || entry.status,
+            VIA_LABELS[entry.via] || entry.via
+        ].filter(Boolean).join(' · ');
+
+        const where = document.createElement('div');
+        where.className = 'where';
+        where.textContent = `${shortUrl(entry.page) || '—'} ← ${shortUrl(entry.image) || '—'}`;
+
+        row.append(what, where);
+
+        if (entry.detail) {
+            const detail = document.createElement('div');
+            detail.className = entry.status === 'error' ? 'detail error' : 'detail';
+            detail.textContent = entry.detail;
+            row.appendChild(detail);
+        }
+
+        return row;
+    }));
+}
+
+/**
  * Ask the archive server for the version and commit of its checkout.
  * The extension and the server share one repository, so the commit served
  * here is the revision the extension was loaded from.
@@ -111,6 +198,16 @@ async function loadBuildInfo() {
         ].filter(Boolean).join(', ');
         commitLink.hidden = false;
         noteEl.hidden = true;
+
+        // An older archive answers the image routes with 404: say so instead of letting a
+        // save fail silently
+        if (!versionAtLeast(info.version, MIN_WEB_PINS_VERSION)) {
+            showStatus(
+                `The archive runs ${info.version}: saving images from other sites needs ` +
+                `${MIN_WEB_PINS_VERSION} or newer. Update the server.`,
+                'error'
+            );
+        }
     } catch (error) {
         noteEl.textContent = 'server unavailable';
         noteEl.title = `${serverUrlInput.value}: ${error.message || error}`;
@@ -235,10 +332,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     saveBtn.addEventListener('click', saveSettings);
     grantBtn.addEventListener('click', saveSettings);
+    document.getElementById('refreshLog').addEventListener('click', renderSaveLog);
+
+    // A save from a page reaches the log while this page is open
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes[SAVE_LOG_KEY]) renderSaveLog();
+    });
 
     // The permission can be revoked from chrome://extensions at any time
     chrome.permissions.onRemoved.addListener(() => refreshAccessState());
 
+    renderSaveLog();
     await refreshAccessState();
     loadBuildInfo();
 });

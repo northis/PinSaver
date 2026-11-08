@@ -36,11 +36,13 @@ chrome.contextMenus.onClicked.addListener((info) => {
  * @param {string} text - Badge text: one character, empty clears it
  * @param {string} color - Badge background
  * @param {string} title - Tooltip shown while the badge is up
+ * @param {boolean} keep - Leave it until the next save: a refusal must not vanish unseen
  */
-function showSaveOutcome(text, color, title) {
+function showSaveOutcome(text, color, title, keep = false) {
     chrome.action.setBadgeBackgroundColor({ color });
     chrome.action.setBadgeText({ text });
     chrome.action.setTitle({ title: `PinSaver: ${title}` });
+    if (keep) return;
     setTimeout(() => {
         chrome.action.setBadgeText({ text: '' });
         chrome.action.setTitle({ title: ACTION_TITLE });
@@ -48,12 +50,99 @@ function showSaveOutcome(text, color, title) {
 }
 
 /**
- * Save one image from any site through the archive API.
+ * Remember one save attempt. The badge is gone in seconds, so the reason for a refusal has
+ * to stay readable: the options page shows the last few.
+ * @param {Object} entry - `{status, detail, via, image, page}`
+ */
+async function logSaveAttempt(entry) {
+    const key = 'saveLog';
+    const stored = await chrome.storage.local.get([key]);
+    const list = Array.isArray(stored[key]) ? stored[key] : [];
+    list.unshift({ at: Date.now(), ...entry });
+    await chrome.storage.local.set({ [key]: list.slice(0, 10) });
+}
+
+/**
+ * Read the image in the browser.
+ *
+ * The archive downloads most pictures itself; this path covers the sites that refuse an
+ * anonymous download (a bot wall, a host on the user's own network) and `data:` links.
+ * Chrome asks once for access to the image's site, and the answer sticks.
+ *
+ * @param {string} url - Image link from the context menu
+ * @returns {Promise<Blob|null>} The image, or null when the browser cannot get it
+ */
+async function fetchImageBlob(url) {
+    try {
+        if (!url.startsWith('data:')) {
+            const origin = originOf(url);
+            if (!origin) return null;
+            const pattern = origin + '/*';
+            const granted = await chrome.permissions.contains({ origins: [pattern] });
+            if (!granted && !(await chrome.permissions.request({ origins: [pattern] }))) {
+                return null;
+            }
+        }
+
+        const response = await fetch(url, { credentials: 'omit', cache: 'no-store' });
+        if (!response.ok) return null;
+        const blob = await response.blob();
+        return blob.size ? blob : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Send a picture the browser already downloaded.
+ * @param {Blob} blob - The image itself
+ * @param {string} imageUrl - Where it came from, empty for a `data:` link
+ * @param {string} pageUrl - Page it was right-clicked on
+ * @returns {Promise<Object>} API response
+ */
+function uploadImageBlob(blob, imageUrl, pageUrl) {
+    return handleApiRequest({
+        path: '/api/pins/web/upload',
+        options: {
+            method: 'POST',
+            headers: {
+                'Content-Type': blob.type || 'application/octet-stream',
+                'X-PinSaver-Page-Url': encodeURIComponent(pageUrl || ''),
+                'X-PinSaver-Image-Url': encodeURIComponent(
+                    imageUrl.startsWith('data:') ? '' : imageUrl
+                )
+            },
+            body: blob
+        }
+    });
+}
+
+/**
+ * Send one image to the archive and report the path it took.
+ *
+ * The server downloads the picture first, which keeps the browser away from the image
+ * sites; when that fails the browser hands the bytes over instead.
+ *
  * @param {string} imageUrl - `info.srcUrl` of the right-clicked image
  * @param {string} pageUrl - `info.pageUrl` of the page it sits on
+ * @returns {Promise<{result: Object, via: string}>} API response and `server`, `browser` or `none`
  */
-async function saveWebImage(imageUrl, pageUrl) {
-    showSaveOutcome('…', '#5b6770', 'saving the image');
+async function sendImage(imageUrl, pageUrl) {
+    if (imageUrl.startsWith('blob:')) {
+        // The link points into the page's memory: neither side can read it afterwards
+        return {
+            result: { success: false, error: 'the image exists only inside the page (blob: link)' },
+            via: 'none'
+        };
+    }
+
+    if (imageUrl.startsWith('data:')) {
+        const blob = await fetchImageBlob(imageUrl);
+        if (!blob) {
+            return { result: { success: false, error: 'cannot read the data: image' }, via: 'none' };
+        }
+        return { result: await uploadImageBlob(blob, imageUrl, pageUrl), via: 'browser' };
+    }
 
     const result = await handleApiRequest({
         path: '/api/pins/web',
@@ -63,13 +152,56 @@ async function saveWebImage(imageUrl, pageUrl) {
             body: JSON.stringify({ image_url: imageUrl, page_url: pageUrl || '' })
         }
     });
+    if (result.success) return { result, via: 'server' };
+
+    const blob = await fetchImageBlob(imageUrl);
+    if (!blob) {
+        // No access to the image's site is something a second click can fix; anything else
+        // was already tried, so the server's reason is the answer
+        const origin = originOf(imageUrl);
+        const granted = origin && await chrome.permissions.contains({ origins: [origin + '/*'] });
+        if (!granted) {
+            return {
+                result: {
+                    success: false,
+                    error: `${result.error} — allow access to ${origin} and try again`
+                },
+                via: 'server'
+            };
+        }
+        return { result, via: 'server' };
+    }
+
+    return { result: await uploadImageBlob(blob, imageUrl, pageUrl), via: 'browser' };
+}
+
+/**
+ * Save one image from any site and show how it went.
+ * @param {string} imageUrl - `info.srcUrl` of the right-clicked image
+ * @param {string} pageUrl - `info.pageUrl` of the page it sits on
+ */
+async function saveWebImage(imageUrl, pageUrl) {
+    showSaveOutcome('…', '#5b6770', 'saving the image');
+
+    const { result, via } = await sendImage(imageUrl, pageUrl);
+    const status = result.success ? result.data.status : 'error';
+    const detail = String(result.success ? result.data.message : result.error).slice(0, 500);
+
+    await logSaveAttempt({
+        status,
+        detail,
+        via,
+        image: String(imageUrl).slice(0, 200),
+        page: String(pageUrl || '').slice(0, 200)
+    });
 
     if (!result.success) {
-        showSaveOutcome('!', '#c0392b', result.error);
+        console.error('PinSaver: image not saved:', detail);
+        showSaveOutcome('!', '#c0392b', detail.slice(0, 300), true);
         return;
     }
 
-    const added = result.data.status === 'added';
+    const added = status === 'added';
     showSaveOutcome(
         added ? '✓' : 'i',
         added ? '#1f9d55' : '#5b6770',
@@ -88,6 +220,7 @@ const ALLOWED_REQUESTS = new Set([
     'POST /api/pins',
     'POST /api/pins/check',
     'POST /api/pins/web',
+    'POST /api/pins/web/upload',
     'GET /health',
     'GET /api/version'
 ]);
