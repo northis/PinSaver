@@ -56,11 +56,12 @@ async def update_deleted_pins():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # Get all pins not yet marked as deleted
+    # Get all pins not yet marked as deleted. Images saved from other sites have no
+    # Pinterest page to check, so they are left out.
     cursor.execute("""
         SELECT id, pin_id, pinterest_url
         FROM pins
-        WHERE is_deleted = 0
+        WHERE is_deleted = 0 AND source_url = ''
         ORDER BY id
     """)
     

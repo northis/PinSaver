@@ -45,3 +45,9 @@ def test_content_script_does_not_mention_server_url() -> None:
     """The content script sends only a path: the background script owns the archive
     address, so a forged page cannot aim the extension at another host."""
     assert "serverUrl" not in CONTENT_SCRIPT.read_text(encoding="utf-8")
+
+
+def test_context_menu_permission_is_declared() -> None:
+    """The service worker registers the "save this image" menu item, so the permission
+    that makes `chrome.contextMenus` available has to be in the manifest."""
+    assert "contextMenus" in manifest()["permissions"]

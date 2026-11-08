@@ -25,9 +25,9 @@ from pydantic import BaseModel
 
 import backup
 import images
-from archive import AddPinError, add_pin_from_url
+from archive import AddPinError, add_pin_from_url, add_web_image
 from buildinfo import build_info
-from models import get_db_path, get_originals_path
+from models import get_db_path, get_originals_path, init_db
 from pinterest import PinLookupError, extract_pin_id, resolve_pin
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -227,7 +227,7 @@ def get_pins(
         order_clause = "ORDER BY source_date DESC, id DESC"
     
     cursor.execute(f"""
-        SELECT id, pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating, is_deleted
+        SELECT id, pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating, is_deleted, source_url
         FROM pins
         {where_clause}
         {order_clause}
@@ -246,6 +246,7 @@ def get_pins(
             "source_date": row["source_date"],
             "rating": row["rating"] or 0,
             "is_deleted": bool(row["is_deleted"]),
+            "source_url": row["source_url"],
             "image_url": f"/images/{row['file_id']}.{row['file_extension']}"
         })
     
@@ -264,7 +265,9 @@ def get_pins(
 @app.get("/api/pins/sync")
 def get_pins_for_sync():
     """
-    Get list of all non-deleted pin IDs for syncing to Pinterest favorites.
+    Get list of all non-deleted Pinterest pin IDs for syncing to Pinterest favorites.
+
+    Images saved from other sites are left out: they have no Pinterest pin to repin.
     
     Returns:
         Dictionary with pin_ids array and total count.
@@ -275,7 +278,7 @@ def get_pins_for_sync():
     cursor.execute("""
         SELECT pin_id
         FROM pins
-        WHERE is_deleted = 0
+        WHERE is_deleted = 0 AND source_url = ''
         ORDER BY source_date DESC, id DESC
     """)
     
@@ -319,6 +322,50 @@ def add_pin(request: AddPinRequest, _: None = Depends(require_csrf)):
             "file_extension": result.file_extension
         }
     return response
+
+
+class AddWebPinRequest(BaseModel):
+    """Request model for saving an image from any site (the extension's context menu)."""
+
+    image_url: str
+    page_url: str = ""
+
+
+#: HTTP status for every way an image from another site can fail to save.
+WEB_PIN_STATUS = {"invalid_url": 400, "not_an_image": 400, "image_unavailable": 502}
+
+
+@app.post("/api/pins/web")
+def add_web_pin(request: AddWebPinRequest, _: None = Depends(require_csrf)):
+    """
+    Save an image from any website as a third-party pin.
+
+    The extension sends the image the user right-clicked and the page it sits on. That page
+    becomes the pin's `source_url`: the gallery shows it, and the Pinterest sync skips the
+    pin, because there is no Pinterest pin behind it.
+
+    Args:
+        request: AddWebPinRequest with the image link and the page it was found on.
+
+    Returns:
+        Dictionary with status, pin_id, file_id, file_extension and message.
+    """
+    conn = get_db_connection()
+    try:
+        result = add_web_image(conn, request.image_url, request.page_url)
+    except AddPinError as error:
+        print(f"web pin: {error.reason} ({error.detail}) for {request.image_url[:200]!r}", flush=True)
+        raise HTTPException(status_code=WEB_PIN_STATUS[error.reason], detail=error.reason)
+    finally:
+        conn.close()
+
+    return {
+        "status": result.status,
+        "pin_id": result.pin_id,
+        "file_id": result.file_id,
+        "file_extension": result.file_extension,
+        "message": result.message,
+    }
 
 
 class ResolvePinRequest(BaseModel):
@@ -857,6 +904,10 @@ def run_servers() -> None:
     only marks the requests that arrive on it as local (`is_local_admin`).
     """
     import uvicorn
+
+    # The database of a working copy predates this release: the migration (the new
+    # `source_url` column) has to run before the first request reads a pin.
+    init_db()
 
     sockets = [_bind(HOST, PORT)]
     if ADMIN_PORT and ADMIN_PORT != PORT:

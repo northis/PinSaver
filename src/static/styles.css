@@ -234,6 +234,20 @@ header h1 {
     text-overflow: ellipsis;
 }
 
+/* An image saved from another site: its host as a pill, so the source is visible at a glance */
+.pin-info .pin-source {
+    display: inline-block;
+    max-width: 100%;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: #eef1f5;
+    color: #4a5568;
+    font-size: 11px;
+    line-height: 1.6;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .pin-info .pin-date {
     margin-top: 2px;
     color: #999;

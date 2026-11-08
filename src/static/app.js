@@ -14,6 +14,10 @@ let imageHeights = new Map();
 let currentSort = 'newest';
 let showDeleted = false;
 
+// Footer height per card, measured once when the card enters the DOM: a pin saved from
+// another site shows its host as a pill, so the footer is not the old fixed 50px.
+const cardFooterHeights = new WeakMap();
+
 const masonry = document.getElementById('masonry');
 const sentinel = document.getElementById('sentinel');
 const loadingEl = document.getElementById('loading');
@@ -92,7 +96,8 @@ function updateCarousel() {
     img.onload = () => img.classList.add('loaded');
 
     counter.textContent = `${carouselIndex + 1} / ${totalPins}`;
-    link.href = pin.pinterest_url;
+    link.href = pin.source_url || pin.pinterest_url;
+    link.textContent = pin.source_url ? 'Open source ↗' : 'Open on Pinterest ↗';
 
     prevBtn.disabled = carouselIndex === 0;
     nextBtn.disabled = false;
@@ -157,11 +162,22 @@ function carouselNext() {
     }
 }
 
+// An image saved from another site shows its host instead of a numbered Pinterest pin id
+function sourceHost(pin) {
+    try {
+        return new URL(pin.source_url).hostname.replace(/^www\./, '');
+    } catch (error) {
+        return pin.source_url;
+    }
+}
+
 function createPinCard(pin, colWidth) {
     const card = document.createElement('div');
     card.className = 'pin-card';
     card.dataset.pinId = pin.pin_id;
     card.style.width = colWidth + 'px';
+
+    const isWeb = Boolean(pin.source_url);
 
     // The image opens the gallery; the pin itself is a separate link on the card
     const openBtn = document.createElement('button');
@@ -171,7 +187,7 @@ function createPinCard(pin, colWidth) {
 
     const img = document.createElement('img');
     img.dataset.src = pin.image_url;
-    img.alt = `Pin ${pin.pin_id}`;
+    img.alt = isWeb ? `Image from ${sourceHost(pin)}` : `Pin ${pin.pin_id}`;
     img.loading = 'lazy';
 
     openBtn.appendChild(img);
@@ -182,10 +198,18 @@ function createPinCard(pin, colWidth) {
 
     const info = document.createElement('div');
     info.className = 'pin-info';
-    info.innerHTML = `
-        <div class="pin-id">${pin.pin_id}</div>
-        <div class="pin-date">${formatDate(pin.source_date)}</div>
-    `;
+
+    const idLine = document.createElement('div');
+    idLine.className = isWeb ? 'pin-id pin-source' : 'pin-id';
+    idLine.textContent = isWeb ? `🌐 ${sourceHost(pin)}` : pin.pin_id;
+    if (isWeb) idLine.title = pin.source_url;
+
+    const dateLine = document.createElement('div');
+    dateLine.className = 'pin-date';
+    dateLine.textContent = formatDate(pin.source_date);
+
+    info.appendChild(idLine);
+    info.appendChild(dateLine);
 
     const rating = parseInt(pin.rating) || 0;
     const isDeleted = pin.is_deleted;
@@ -211,10 +235,10 @@ function createPinCard(pin, colWidth) {
 
     const pinLink = document.createElement('a');
     pinLink.className = 'pin-link';
-    pinLink.href = pin.pinterest_url;
+    pinLink.href = isWeb ? pin.source_url : pin.pinterest_url;
     pinLink.target = '_blank';
     pinLink.rel = 'noopener noreferrer';
-    pinLink.title = 'Open on Pinterest';
+    pinLink.title = isWeb ? 'Open the source page' : 'Open on Pinterest';
     pinLink.innerHTML = '↗';
 
     card.appendChild(openBtn);
@@ -257,12 +281,11 @@ function layoutPins() {
 
         const img = card.querySelector('img');
         const cardRef = card;
-        const pinIndex = i;
         
         img.onload = function() {
             const actualHeight = this.naturalHeight * (colWidth / this.naturalWidth);
             imageHeights.set(pin.pin_id, actualHeight);
-            relayoutSingleCard(cardRef, pinIndex, actualHeight + 50);
+            relayoutSingleCard();
         };
         
         img.src = img.dataset.src;
@@ -274,13 +297,22 @@ function layoutPins() {
     }
 
     masonry.appendChild(fragment);
+
+    // Batched read: a per-card measurement inside the layout loops would force a reflow
+    // after every transform write
+    masonry.querySelectorAll('.pin-card').forEach(card => {
+        if (!cardFooterHeights.has(card)) {
+            cardFooterHeights.set(card, card.querySelector('.pin-info').offsetHeight);
+        }
+    });
+
     renderedCount = allPins.length;
     
     const maxHeight = Math.max(...columnHeights);
     masonry.style.height = maxHeight + 'px';
 }
 
-function relayoutSingleCard(card, index, actualCardHeight) {
+function relayoutSingleCard() {
     const colWidth = getColumnWidth();
     
     columnHeights = new Array(columns).fill(0);
@@ -289,7 +321,7 @@ function relayoutSingleCard(card, index, actualCardHeight) {
     cards.forEach((c, i) => {
         const pin = allPins[i];
         const height = imageHeights.get(pin.pin_id) || colWidth * 1.3;
-        const cardHeight = height + 50;
+        const cardHeight = height + (cardFooterHeights.get(c) || 50);
         
         const colIndex = getShortestColumn();
         const x = colIndex * (colWidth + GAP);
@@ -312,7 +344,7 @@ function fullRelayout() {
     cards.forEach((c, i) => {
         const pin = allPins[i];
         const height = imageHeights.get(pin.pin_id) || colWidth * 1.3;
-        const cardHeight = height + 50;
+        const cardHeight = height + (cardFooterHeights.get(c) || 50);
         
         c.style.width = colWidth + 'px';
         

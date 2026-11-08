@@ -8,6 +8,75 @@ chrome.action.onClicked.addListener(() => {
     chrome.runtime.openOptionsPage();
 });
 
+// Right-clicking an image on any site offers to archive it. The context menu already
+// carries the image and page links, so that path needs no content script outside Pinterest.
+const SAVE_IMAGE_MENU_ID = 'pinsaver-save-image';
+const ACTION_TITLE = 'Pinterest Archive Saver - settings';
+
+chrome.runtime.onInstalled.addListener(() => {
+    // Re-created rather than updated: a changed title would otherwise stay stale
+    chrome.contextMenus.removeAll(() => {
+        chrome.contextMenus.create({
+            id: SAVE_IMAGE_MENU_ID,
+            title: 'Save image to PinSaver',
+            contexts: ['image']
+        });
+    });
+});
+
+chrome.contextMenus.onClicked.addListener((info) => {
+    if (info.menuItemId === SAVE_IMAGE_MENU_ID && info.srcUrl) {
+        saveWebImage(info.srcUrl, info.pageUrl);
+    }
+});
+
+/**
+ * Report the outcome where the user is looking: the badge on the toolbar icon, with the
+ * reason in the tooltip. A page that is not Pinterest has no content-script notification.
+ * @param {string} text - Badge text: one character, empty clears it
+ * @param {string} color - Badge background
+ * @param {string} title - Tooltip shown while the badge is up
+ */
+function showSaveOutcome(text, color, title) {
+    chrome.action.setBadgeBackgroundColor({ color });
+    chrome.action.setBadgeText({ text });
+    chrome.action.setTitle({ title: `PinSaver: ${title}` });
+    setTimeout(() => {
+        chrome.action.setBadgeText({ text: '' });
+        chrome.action.setTitle({ title: ACTION_TITLE });
+    }, 5000);
+}
+
+/**
+ * Save one image from any site through the archive API.
+ * @param {string} imageUrl - `info.srcUrl` of the right-clicked image
+ * @param {string} pageUrl - `info.pageUrl` of the page it sits on
+ */
+async function saveWebImage(imageUrl, pageUrl) {
+    showSaveOutcome('…', '#5b6770', 'saving the image');
+
+    const result = await handleApiRequest({
+        path: '/api/pins/web',
+        options: {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_url: imageUrl, page_url: pageUrl || '' })
+        }
+    });
+
+    if (!result.success) {
+        showSaveOutcome('!', '#c0392b', result.error);
+        return;
+    }
+
+    const added = result.data.status === 'added';
+    showSaveOutcome(
+        added ? '✓' : 'i',
+        added ? '#1f9d55' : '#5b6770',
+        added ? 'image saved to the archive' : 'image is already in the archive'
+    );
+}
+
 // Where the archive lives when the user has not configured another address
 const DEFAULT_SERVER_URL = 'http://localhost:8000';
 
@@ -18,6 +87,7 @@ const ALLOWED_REQUESTS = new Set([
     'GET /api/pins/sync',
     'POST /api/pins',
     'POST /api/pins/check',
+    'POST /api/pins/web',
     'GET /health',
     'GET /api/version'
 ]);

@@ -10,7 +10,7 @@ from typing import Optional
 
 @dataclass
 class Pin:
-    """Represents a Pinterest pin with its metadata."""
+    """A pin with its metadata: a Pinterest pin, or an image saved from another site."""
     pin_id: str
     file_id: str
     file_extension: str
@@ -20,6 +20,9 @@ class Pin:
     id: Optional[int] = None
     rating: int = 0
     is_deleted: bool = False
+    #: Page the image was found on. Empty for a Pinterest pin; a pin with it is third-party
+    #: and never goes back to Pinterest (`GET /api/pins/sync`).
+    source_url: str = ""
 
 
 def get_base_path() -> Path:
@@ -71,7 +74,8 @@ def init_db(db_path: Optional[Path] = None) -> None:
             original_url TEXT NOT NULL,
             source_date INTEGER,
             rating INTEGER NOT NULL DEFAULT 0,
-            is_deleted INTEGER NOT NULL DEFAULT 0
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            source_url TEXT NOT NULL DEFAULT ''
         )
     """)
     
@@ -85,6 +89,8 @@ def init_db(db_path: Optional[Path] = None) -> None:
         cursor.execute("ALTER TABLE pins ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
     if 'is_deleted' not in columns:
         cursor.execute("ALTER TABLE pins ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+    if 'source_url' not in columns:
+        cursor.execute("ALTER TABLE pins ADD COLUMN source_url TEXT NOT NULL DEFAULT ''")
     
     conn.commit()
     conn.close()
@@ -122,9 +128,9 @@ def insert_pin(conn: sqlite3.Connection, pin: Pin) -> bool:
     
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO pins (pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (pin.pin_id, pin.file_id, pin.file_extension, pin.pinterest_url, pin.original_url, pin.source_date, pin.rating))
+        INSERT INTO pins (pin_id, file_id, file_extension, pinterest_url, original_url, source_date, rating, source_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (pin.pin_id, pin.file_id, pin.file_extension, pin.pinterest_url, pin.original_url, pin.source_date, pin.rating, pin.source_url))
     
     return True
 

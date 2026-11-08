@@ -10,9 +10,11 @@ pool and a slow image download never blocks the event loop.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -30,6 +32,9 @@ FALLBACK_SIZES = ("736x", "564x", "474x", "236x")
 #: 736x copy that would otherwise be the best left.
 FALLBACK_EXTENSIONS = ("jpg", "webp", "png", "heic")
 DOWNLOAD_TIMEOUT_SECONDS = 30.0
+#: An image from another site is buffered whole before it is checked, so a limit keeps one
+#: absurd link from filling the memory of the machine that also serves the archive.
+MAX_WEB_IMAGE_BYTES = 50 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -71,7 +76,8 @@ class AddPinError(Exception):
     A pin could not be added.
 
     Attributes:
-        reason: `invalid_url` (the API answers 400) or `image_unavailable` (500/502).
+        reason: `invalid_url` (the API answers 400), `not_an_image` (400) or
+            `image_unavailable` (500/502).
         detail: human-readable cause, passed on to the caller.
     """
 
@@ -292,5 +298,113 @@ def add_pin_from_url(
         file_id=file_id,
         file_extension=extension,
         size=size,
+        image_url=image_url,
+    )
+
+
+def add_web_image(
+    conn,
+    image_url: str,
+    page_url: str = "",
+    client: httpx.Client | None = None,
+) -> AddResult:
+    """
+    Save an image from a site other than Pinterest.
+
+    The image is downloaded from whichever URL it lives at, and its file id is the hash of
+    the stored bytes: the same picture saved twice only raises the rating. The pin is
+    marked third-party by its `source_url` (the page it was found on) and never appears in
+    the sync back to Pinterest.
+
+    Args:
+        conn: open SQLite connection (this function commits).
+        image_url: http(s) link to the image itself.
+        page_url: page the image was right-clicked on; the image link itself when the client
+            sends none, so a third-party pin always has a page to show and link to.
+        client: optional download client (tests inject one with a mock transport).
+
+    Returns:
+        AddResult describing the outcome.
+
+    Raises:
+        AddPinError: `invalid_url`, `not_an_image` or `image_unavailable`.
+    """
+    if urlsplit(image_url).scheme not in ("http", "https"):
+        raise AddPinError("invalid_url", "only http(s) image links can be saved")
+
+    own_client = None
+    if client is None:
+        own_client = new_client()
+        client = own_client
+    try:
+        response = client.get(image_url)
+    except httpx.HTTPError as error:
+        raise AddPinError("image_unavailable", str(error))
+    finally:
+        if own_client is not None:
+            own_client.close()
+
+    if response.status_code != 200 or not response.content:
+        raise AddPinError("image_unavailable", f"{image_url}: HTTP {response.status_code}")
+
+    if len(response.content) > MAX_WEB_IMAGE_BYTES:
+        raise AddPinError("image_unavailable", f"{image_url}: larger than {MAX_WEB_IMAGE_BYTES} bytes")
+
+    # Bytes, not the extension of the link: a saved file has to be one the site can serve
+    if images.sniff(response.content) is None:
+        raise AddPinError("not_an_image", "the link is not an image")
+
+    try:
+        prepared = images.prepare(response.content, "jpg")
+    except images.ImageConversionError as error:
+        raise AddPinError("image_unavailable", f"cannot convert the image: {error}")
+
+    file_id = hashlib.sha256(prepared.content).hexdigest()[:32]
+    pin_id = f"web-{file_id}"
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM pins WHERE pin_id = ?", (pin_id,))
+    existing = cursor.fetchone()
+    if existing:
+        cursor.execute("UPDATE pins SET rating = rating + 1 WHERE id = ?", (existing["id"],))
+        conn.commit()
+        return AddResult(
+            status="exists",
+            message=f"Image {pin_id} already exists in archive (rating +1)",
+            pin_id=pin_id,
+            file_id=file_id,
+            file_extension=prepared.extension,
+        )
+
+    originals_path = get_originals_path()
+    originals_path.mkdir(parents=True, exist_ok=True)
+    image_path = originals_path / f"{file_id}.{prepared.extension}"
+
+    if not image_path.exists():
+        image_path.write_bytes(prepared.content)
+        if prepared.original:
+            # Same pair as a HEIC pin: the site shows the JPEG, the archive keeps the original
+            original_path = originals_path / f"{file_id}.{prepared.original_extension}"
+            original_path.write_bytes(prepared.original)
+
+    insert_pin(conn, Pin(
+        pin_id=pin_id,
+        file_id=file_id,
+        file_extension=prepared.extension,
+        pinterest_url="",
+        original_url=image_url,
+        source_date=int(time.time()),
+        # Never empty: an empty source_url is what marks a Pinterest pin, and the sync
+        # would then try to repin an id Pinterest never issued
+        source_url=page_url or image_url,
+    ))
+    conn.commit()
+
+    return AddResult(
+        status="added",
+        message=f"Image {pin_id} added to archive",
+        pin_id=pin_id,
+        file_id=file_id,
+        file_extension=prepared.extension,
         image_url=image_url,
     )
