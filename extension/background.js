@@ -318,17 +318,20 @@ async function handleApiRequest(message) {
 
         // Cloudflare Access answers a missing session either with a redirect off our
         // origin or with an HTML sign-in page under 200: both mean "not signed in",
-        // not a server failure. The status and the address it went to are what tells
-        // which one happened.
+        // not a server failure. A proxy's own 5xx page is a different thing: the archive
+        // is down, and no sign-in will fix that.
         const contentType = response.headers.get('content-type') || '';
         if ((response.redirected && originOf(response.url) !== origin) || !contentType.includes('application/json')) {
             const detail = response.redirected
                 ? `redirected to ${response.url}`
                 : `${response.status} ${contentType || 'no content type'}`;
+            const signIn = response.status < 500;
             return {
                 success: false,
-                code: 'NOT_AUTHENTICATED',
-                error: `the archive asked for a sign-in (${detail}) — open ${origin} and sign in`
+                code: signIn ? 'NOT_AUTHENTICATED' : 'SERVER_DOWN',
+                error: signIn
+                    ? `the archive asked for a sign-in (${detail}) — open ${origin} and sign in`
+                    : `the archive is not answering (${detail}) — check that its server is running`
             };
         }
 
