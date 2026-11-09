@@ -154,9 +154,13 @@ async function sendImage(imageUrl, pageUrl) {
     });
     if (result.success) return { result, via: 'server' };
 
-    // Only a picture the archive tried and failed to download is worth the browser's help:
-    // a sign-in, a missing route or an unreachable server needs the user, not another try
-    if (result.code !== 'HTTP' || !/^HTTP 502\b/.test(result.error)) {
+    // A 5xx is the archive failing on the picture — its own 502 (image_unavailable) or a
+    // proxy page when the download outlasts the proxy: the browser can still hand the bytes
+    // over, and that upload is fast. A sign-in, a missing route or an unreachable server
+    // needs the user instead.
+    const serverFailed = result.code === 'SERVER_DOWN'
+        || (result.code === 'HTTP' && /^HTTP 5\d\d\b/.test(result.error));
+    if (!serverFailed) {
         return { result, via: 'server' };
     }
 
@@ -322,9 +326,16 @@ async function handleApiRequest(message) {
         // is down, and no sign-in will fix that.
         const contentType = response.headers.get('content-type') || '';
         if ((response.redirected && originOf(response.url) !== origin) || !contentType.includes('application/json')) {
-            const detail = response.redirected
-                ? `redirected to ${response.url}`
-                : `${response.status} ${contentType || 'no content type'}`;
+            // The first words of the page say who answered: Cloudflare's "Bad gateway",
+            // Traefik's, or the Access sign-in form
+            const page = await response.text().catch(() => '');
+            const snippet = page.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+            const detail = [
+                response.redirected
+                    ? `redirected to ${response.url}`
+                    : `${response.status} ${contentType || 'no content type'}`,
+                snippet
+            ].filter(Boolean).join(' · ');
             const signIn = response.status < 500;
             return {
                 success: false,

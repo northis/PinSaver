@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from collections.abc import Iterator
 from html import escape
 from pathlib import Path
@@ -362,16 +363,29 @@ def add_web_pin(request: AddWebPinRequest, _: None = Depends(require_csrf)):
     Returns:
         Dictionary with status, pin_id, file_id, file_extension and message.
     """
+    started = time.monotonic()
+    # Says whether the request reached the app at all: without this line in the log, the
+    # proxy answered and nothing was downloaded
+    print(f"web pin: fetching {request.image_url[:200]!r} for {request.page_url[:200]!r}", flush=True)
+
     conn = get_db_connection()
     try:
         result = add_web_image(conn, request.image_url, request.page_url)
     except AddPinError as error:
-        print(f"web pin: {error.reason} ({error.detail}) for {request.image_url[:200]!r}", flush=True)
+        print(
+            f"web pin: {error.reason} ({error.detail}) after {time.monotonic() - started:.1f}s"
+            f" for {request.image_url[:200]!r}",
+            flush=True,
+        )
         raise HTTPException(status_code=WEB_PIN_STATUS[error.reason], detail=error.reason)
     finally:
         conn.close()
 
-    print(f"web pin: {result.status} {result.pin_id} from {request.page_url[:200]!r}", flush=True)
+    print(
+        f"web pin: {result.status} {result.pin_id} in {time.monotonic() - started:.1f}s"
+        f" from {request.page_url[:200]!r}",
+        flush=True,
+    )
     return _web_pin_response(result)
 
 
