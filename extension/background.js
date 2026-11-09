@@ -154,6 +154,12 @@ async function sendImage(imageUrl, pageUrl) {
     });
     if (result.success) return { result, via: 'server' };
 
+    // Only a picture the archive tried and failed to download is worth the browser's help:
+    // a sign-in, a missing route or an unreachable server needs the user, not another try
+    if (result.code !== 'HTTP' || !/^HTTP 502\b/.test(result.error)) {
+        return { result, via: 'server' };
+    }
+
     const blob = await fetchImageBlob(imageUrl);
     if (!blob) {
         // No access to the image's site is something a second click can fix; anything else
@@ -173,6 +179,19 @@ async function sendImage(imageUrl, pageUrl) {
     }
 
     return { result: await uploadImageBlob(blob, imageUrl, pageUrl), via: 'browser' };
+}
+
+/**
+ * Open the archive in a tab. A Cloudflare Access session lives in the browser, so a
+ * sign-in page can only be answered there.
+ */
+async function openArchiveTab() {
+    try {
+        const { serverUrl } = await chrome.storage.sync.get(['serverUrl']);
+        await chrome.tabs.create({ url: serverUrl || DEFAULT_SERVER_URL });
+    } catch {
+        // The badge and the log already carry the reason; the tab is a convenience
+    }
 }
 
 /**
@@ -198,6 +217,7 @@ async function saveWebImage(imageUrl, pageUrl) {
     if (!result.success) {
         console.error('PinSaver: image not saved:', detail);
         showSaveOutcome('!', '#c0392b', detail.slice(0, 300), true);
+        if (result.code === 'NOT_AUTHENTICATED') await openArchiveTab();
         return;
     }
 
@@ -276,7 +296,11 @@ async function handleApiRequest(message) {
 
         const granted = await chrome.permissions.contains({ origins: [origin + '/*'] });
         if (!granted) {
-            return { success: false, code: 'NO_PERMISSION', error: 'access to this origin is not granted' };
+            return {
+                success: false,
+                code: 'NO_PERMISSION',
+                error: `access to ${origin} is not granted — open the extension settings and press Save`
+            };
         }
 
         // Guard against a hung request: without it a pin would stay in-flight forever
@@ -294,10 +318,18 @@ async function handleApiRequest(message) {
 
         // Cloudflare Access answers a missing session either with a redirect off our
         // origin or with an HTML sign-in page under 200: both mean "not signed in",
-        // not a server failure.
+        // not a server failure. The status and the address it went to are what tells
+        // which one happened.
         const contentType = response.headers.get('content-type') || '';
         if ((response.redirected && originOf(response.url) !== origin) || !contentType.includes('application/json')) {
-            return { success: false, code: 'NOT_AUTHENTICATED', error: 'the server answered with a sign-in page' };
+            const detail = response.redirected
+                ? `redirected to ${response.url}`
+                : `${response.status} ${contentType || 'no content type'}`;
+            return {
+                success: false,
+                code: 'NOT_AUTHENTICATED',
+                error: `the archive asked for a sign-in (${detail}) — open ${origin} and sign in`
+            };
         }
 
         if (!response.ok) {
@@ -307,7 +339,10 @@ async function handleApiRequest(message) {
 
         return { success: true, data: await response.json() };
     } catch (error) {
-        return { success: false, code: 'NETWORK', error: error.message };
+        const reason = error.name === 'AbortError'
+            ? 'the archive did not answer within 60 seconds'
+            : error.message;
+        return { success: false, code: 'NETWORK', error: `could not reach the archive — ${reason}` };
     } finally {
         clearTimeout(timeoutId);
     }
