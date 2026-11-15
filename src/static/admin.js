@@ -172,9 +172,13 @@ async function runBackup() {
             headers: REQUEST_HEADER
         });
         const backup = payload.backup;
-        setStatus('backupStatus',
-            `${backup.name} created: ${backup.originals} image(s), ${formatBytes(backup.bytes)}.`,
-            'ok');
+        if (payload.status === 'skipped') {
+            setStatus('backupStatus', 'Nothing changed since the last backup.', 'ok');
+        } else {
+            setStatus('backupStatus',
+                `${backup.name} created: ${backup.originals} image(s), ${formatBytes(backup.bytes)}.`,
+                'ok');
+        }
         await refresh();
     } catch (error) {
         const message = error.status === 409

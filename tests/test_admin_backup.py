@@ -230,6 +230,26 @@ def test_backup_list_is_newest_first(admin_client: TestClient, data_dir: Path) -
     assert listing[0]["created_utc"].startswith("2023-11-14T")
 
 
+def test_incremental_backup_is_skipped_when_nothing_changed(admin_client: TestClient,
+                                                            data_dir: Path) -> None:
+    """No new images and an untouched database: no archive, and the state stays put."""
+    image = write_image(data_dir, "abcdef.jpg")
+    add_pin()
+    # Older than the backup, so the state's second of slack does not count them as changes.
+    old = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
+    for path in (image, models.get_db_path()):
+        os.utime(path, (old, old))
+
+    first = admin_client.post("/api/admin/backup", headers=HEADER).json()
+    again = admin_client.post("/api/admin/backup", headers=HEADER).json()
+
+    assert first["status"] == "created"
+    assert again["status"] == "skipped"
+    assert len(list((data_dir / "backups").glob("*.zip"))) == 1
+    state = json.loads((data_dir / "backups" / "backup_state.json").read_text(encoding="utf-8"))
+    assert state["last_backup_zip"] == first["backup"]["name"]
+
+
 def test_backup_run_needs_the_csrf_header(admin_client: TestClient) -> None:
     assert admin_client.post("/api/admin/backup").status_code == 403
 

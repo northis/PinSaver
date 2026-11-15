@@ -128,6 +128,23 @@ def collect_originals_to_backup(originals_path: Path, last_backup_time: datetime
     return sorted([p for p in files if file_mtime_utc(p) > last_backup_time])
 
 
+def db_changed_since(db_path: Path, last_backup_time: datetime | None) -> bool:
+    """The database or its journal was written after the last backup."""
+
+    if last_backup_time is None:
+        return True
+
+    last_ts = last_backup_time.timestamp()
+    for path in (db_path, db_path.with_name(f"{db_path.name}-wal")):
+        try:
+            if path.stat().st_mtime > last_ts:
+                return True
+        except OSError:
+            continue
+
+    return False
+
+
 def originals_stats(originals_path: Path) -> dict:
     """Number of images and their total size, for the maintenance page."""
 
@@ -333,13 +350,28 @@ def run_backup(paths: BackupPaths | None = None) -> dict:
     last_backup_time = load_last_backup_time(paths.state_path)
     originals_files = collect_originals_to_backup(paths.originals_path, last_backup_time)
 
-    now = utc_now()
+    # Whole seconds: the state time is a watermark with a little slack, so a file the
+    # filesystem timestamps a few milliseconds "before" the run start is not missed.
+    now = utc_now().replace(microsecond=0)
+    if not originals_files and not db_changed_since(paths.db_path, last_backup_time):
+        # Nothing to pack, and the state keeps pointing at the last archive that exists.
+        return {
+            "skipped": True,
+            "name": None,
+            "bytes": 0,
+            "created_utc": now.isoformat(),
+            "originals": 0,
+            "database": False,
+            "previous_backup_utc": last_backup_time.isoformat() if last_backup_time else None,
+        }
+
     zip_path = unique_path(paths.output_dir / build_backup_zip_name(now))
 
     create_backup_zip(zip_path, paths.db_path, originals_files)
     write_state(paths.state_path, now, zip_path)
 
     return {
+        "skipped": False,
         **backup_item(zip_path, created_utc=now),
         "originals": len(originals_files),
         "database": paths.db_path.exists(),
@@ -352,6 +384,10 @@ def main() -> None:
 
     paths = get_paths()
     result = run_backup(paths)
+
+    if result["skipped"]:
+        print(f"Nothing changed since {result['previous_backup_utc'] or 'never'}; no backup created")
+        return
 
     print("Backup created")
     print(f"  Zip: {paths.output_dir / result['name']}")

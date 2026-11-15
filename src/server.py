@@ -939,7 +939,7 @@ def admin_run_backup(_: None = Depends(require_csrf)):
     finally:
         BACKUP_LOCK.release()
 
-    return {"status": "created", "backup": result}
+    return {"status": "skipped" if result["skipped"] else "created", "backup": result}
 
 
 def _bind(host: str, port: int):
