@@ -29,6 +29,7 @@ python src/updateDelete.py                      # mark pins deleted from Pintere
 python src/importer.py                          # rebuild the database from a Pinterest HTML export
 python src/migrate_duplicates.py                # merge duplicates by file_id
 python src/convert_heic.py                      # convert stored HEIC originals to JPEG
+python src/repair_images.py                     # re-download originals missing from originals/
 python tools/bump_version.py X.Y.Z              # bump the version everywhere
 python tools/bump_version.py --check            # verify every copy of the version matches
 python tools/make_extension_icons.py            # regenerate extension PNGs from extension/icon.svg

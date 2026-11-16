@@ -489,6 +489,7 @@ python tools/make_pwa_icons.py
 | `python src/backup.py` | инкрементальный бэкап в `backups/` |
 | `python src/migrate_duplicates.py` | схлопнуть дубликаты по `file_id` |
 | `python src/convert_heic.py` | перевести сохранённые HEIC в JPEG (и поправить базу) |
+| `python src/repair_images.py` | проверить, что у каждого пина есть файл в `originals/`, и докачать пропавшие (`--dry-run` — только показать) |
 | `python src/buildinfo.py` | напечатать версию, коммит и ссылки |
 | `python tools/bump_version.py X.Y.Z` | поднять версию в `src/` и `extension/` |
 | `python tools/make_extension_icons.py` | перерисовать PNG-иконки из `extension/icon.svg` |
@@ -544,6 +545,7 @@ PinSaver/
 │   ├── importer.py           # импорт разобранных пинов в базу
 │   ├── migrate_duplicates.py # схлопывание дубликатов по file_id
 │   ├── convert_heic.py       # HEIC в originals/ → JPEG, с правкой базы
+│   ├── repair_images.py      # докачать картинки, пропавшие из originals/
 │   ├── updateDelete.py       # проверка удалённых пинов через Playwright
 │   ├── backup.py             # бэкапы: инкрементальный в backups/ и полный потоком
 │   ├── requirements.txt      # рантайм: его же ставит контейнер (Pillow, pillow-heif)
