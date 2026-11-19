@@ -1,6 +1,6 @@
 # PinSaver in a container: the site on 0.0.0.0:8000.
 # The archive (database, originals, backups) is not baked in - docker-compose.yml mounts it.
-FROM python:3.14-slim
+FROM python:slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
