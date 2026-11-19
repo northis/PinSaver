@@ -7,5 +7,7 @@ dotenv==0.9.9
 # Images: HEIC originals are converted to JPEG when they are saved (src/images.py), so
 # the runtime decodes images itself. Pillow is pinned here too, because it is no longer
 # only a tool for the host scripts; pillow-heif brings libheif in its own wheel.
-Pillow==12.1.0
+# Both ship compiled wheels, and the image is built on the floating python:slim tag: a pin
+# with no wheel for that Python (Pillow 12.1.0 on 3.15) turns the build into a gcc job.
+Pillow==13.0.0
 pillow-heif==1.8.1
